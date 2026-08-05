@@ -1,0 +1,41 @@
+Nucleo RAG vendorizzato da talk-docs (Depp Srl).
+
+Provenienza:   repository DeppSRL/talk-docs
+Commit pinnato: 6dd976c946bc5ef296dd4f6c8e7b00a242dc6c2b  (2026-07-29)
+Data vendoring: 2026-08-04
+
+Ambito (spec §3 di docs/plans/2026-08-04-rag-mistral-prototype-spec.md):
+copiato SOLO il nucleo framework-free di retrieval/generazione/embedding. NON è
+copiato lo strato applicativo (FastAPI, api/, auth/, mcp/, google_drive, i18n
+completo).
+
+Moduli copiati:
+  models/document.py                         (leaf, invariato)
+  vector_stores/base.py                      (import app.* → relativo)
+  vector_stores/keyword_index.py             (invariato)
+  vector_stores/whoosh_index.py              (+ index_documents, vedi sotto)
+  vector_stores/chroma.py                    (settings rimosso; chunking interna
+                                              neutralizzata; embedding iniettato)
+  services/embeddings.py                     (settings rimosso; client/model/dim iniettati)
+  services/openrouter_client.py → mistral_client.py  (generalizzato al base_url Mistral)
+  services/llm_generation.py                 (settings rimosso; i18n inline; model iniettato)
+  services/hybrid_search.py                  (invariato, già config-free)
+  utils/text_processing.py                   (clean_text riusato; chunk_text NON riusato)
+
+Modifica strutturale trasversale (spec §3):
+  `from app.config import settings` (singleton letto all'import) è sostituito da un
+  `RagConfig` (dataclass frozen, repo-root config.py) iniettato via costruttore.
+  `app.i18n.t("no_context")` → costante inline.
+
+Aggiunta funzionale (2026-08-05): `WhooshKeywordIndex.index_documents(items)`
+  Indicizzazione batch con UN writer e UN commit. Il `index_document` originale committa
+  per documento (un segmento per commit → merge sempre più costosi): forma corretta per
+  l'upload occasionale in talk-docs, rovinosa per l'ingest del banco. Misurato sulle 511
+  delibere / 13.670 chunk: 33,6 → 24,2 doc/s *in calo*, 10-20 minuti, da ripagare a ogni
+  run perché `poc-runner.yml` ricostruisce l'indice su runner effimero. Il metodo
+  originale resta invariato; il batch è additivo (test: tests/test_whoosh_batch.py, incluso
+  un test di equivalenza dello stato finale col ciclo per-documento).
+  → Candidato da riportare a monte in talk-docs.
+
+Divergenza accettata: PoC time-boxed, non un fork da mantenere. Se talk-docs migliora
+il retrieval, non viene ereditato in automatico.
