@@ -1,0 +1,223 @@
+"""RagConfig — configurazione iniettata che sostituisce il singleton ``app.config.settings``
+di talk-docs.
+
+Razionale (spec §3): il singleton letto all'import è la sola colla trasversale del
+nucleo vendored. Sostituirlo con una dataclass *frozen* passata ai costruttori non è un
+ripiego: rende chunk size, pesi hybrid, RRF-k, modello, soglie e temperatura **parametri
+che l'eval spazza per run**. Nessun modulo vendored deve leggere l'ambiente all'import.
+
+Precedenza dei valori: parametri espliciti > variabili d'ambiente (``.env`` via
+``python-dotenv``) > default qui sotto.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, replace
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:  # dotenv è opzionale a runtime (env già iniettato nell'environment)
+    pass
+
+
+def _get(name: str, default: str | None = None) -> str | None:
+    """Valore dall'ambiente, altrimenti il default.
+
+    ``python-dotenv`` ripulisce il commento inline solo quando la variabile ha un valore:
+    su ``SUPPORT_THRESHOLD=   # da tarare`` il commento *diventa* il valore. Nessuno di
+    questi parametri può iniziare con ``#``, quindi un valore così è un residuo di
+    commento e vale come assente — meglio il default che un ValueError a metà config, e
+    meglio "chiave assente" che una chiave spazzatura spedita all'API.
+    """
+    val = os.environ.get(name)
+    if val is not None:
+        val = val.strip()
+        if val.startswith("#"):
+            val = ""
+    return val if val not in (None, "") else default
+
+
+def _get_float(name: str, default: float) -> float:
+    raw = _get(name)
+    return float(raw) if raw is not None else default
+
+
+def _get_int(name: str, default: int) -> int:
+    raw = _get(name)
+    return int(raw) if raw is not None else default
+
+
+def _get_opt_float(name: str) -> float | None:
+    raw = _get(name)
+    return float(raw) if raw is not None else None
+
+
+_TRUE_VALUES = ("1", "true", "yes", "on", "si", "sì")
+_FALSE_VALUES = ("0", "false", "no", "off")
+
+
+def _get_bool(name: str, default: bool) -> bool:
+    """Flag booleano, con lo stesso patto di ``_get_float``/``_get_int``: assente → default,
+    non interpretabile → ``ValueError``.
+
+    Un valore non riconosciuto **non** vale ``False``. Un flag scritto male
+    (``ROUTER_ENABLED=tru``, ``VERBATIM_ENABLED=Y``) sarebbe indistinguibile da uno
+    spegnimento voluto: spegnerebbe in silenzio il meccanismo che governa, ed è
+    esattamente la classe di guasto già pagata con ``SUPPORT_THRESHOLD`` lasciata vuota —
+    il rifiuto deterministico non scattava mai e nessuno se ne accorgeva.
+
+    Le forme italiane sono accettate perché l'``.env`` si compila a mano.
+    """
+    raw = _get(name)
+    if raw is None:
+        return default
+    val = raw.lower()
+    if val in _TRUE_VALUES:
+        return True
+    if val in _FALSE_VALUES:
+        return False
+    raise ValueError(
+        f"{name}: valore booleano non riconosciuto {raw!r}. "
+        f"Attesi {'/'.join(_TRUE_VALUES)} oppure {'/'.join(_FALSE_VALUES)}."
+    )
+
+
+@dataclass(frozen=True)
+class RagConfig:
+    """Parametri di una run. Frozen: per variare un parametro si usa ``with_overrides``."""
+
+    # --- Provider Mistral La Plateforme (diretto, sovranità EU) ---
+    mistral_api_key: str = ""
+    mistral_base_url: str = "https://api.mistral.ai/v1"
+    # Stringhe PINNATE (M1). Mai alias -latest.
+    mistral_model: str = "ministral-14b-2512"
+    mistral_embed_model: str = "mistral-embed-2312"
+    embed_dim: int = 1024
+
+    # --- Inferenza (riproducibilità) ---
+    llm_temperature: float = 0.0
+    max_output_tokens: int = 512
+    llm_seed: int | None = None
+
+    # --- Trasporto HTTP verso La Plateforme ---
+    # Il default dell'SDK OpenAI è 600 s di read timeout: su una connessione del pool
+    # morta (es. il portatile è andato in suspend a metà run) una singola richiesta blocca
+    # la run per 10 minuti *senza output*, e la latenza registrata diventa un artefatto.
+    # 60 s è oltre il doppio della coda peggiore osservata su 512 token di output.
+    http_timeout_s: float = 60.0
+    http_connect_timeout_s: float = 10.0
+    http_max_retries: int = 3
+
+    # --- Vector store (Chroma) ---
+    chroma_persist_dir: str = "./chroma_db"
+    chroma_collection_retrieval: str = "corpus"
+    chroma_collection_cache: str = "semantic_cache"
+
+    # --- Chunking (C1) — variabili d'eval ---
+    chunk_tokens: int = 400
+    chunk_overlap_ratio: float = 0.12
+
+    # --- Retrieval hybrid (RRF) — variabili d'eval ---
+    hybrid_vector_weight: float = 0.7
+    hybrid_keyword_weight: float = 0.3
+    rrf_constant: int = 60
+    rag_top_k: int = 5
+    whoosh_index_dir: str = "data/whoosh_index"
+
+    # --- Soglie di policy ---
+    # Sotto SUPPORT_THRESHOLD (similarità densa del miglior chunk, 0..1) → rifiuto
+    # deterministico (C3), ramo di codice non istruzione nel prompt. Da tarare sull'eval.
+    support_threshold: float = 0.55
+    # Cache semantica: prudente, meglio un miss (C4). Similarità coseno minima per hit.
+    cache_sim_threshold: float = 0.92
+    # Guardiano di astensione (C3b): IDF minimo del termine mancante più raro perché la
+    # pipeline si astenga invece di rispondere. `support_threshold` non basta — misurato su
+    # ic-07-bis: support 0,878 sopra soglia, e nessun passaggio conteneva «quote premiali».
+    # 5,5 ≈ «un termine presente in meno di ~55 chunk su 13.670 è del tutto assente dai
+    # passaggi». Tarato sui 33 item: precisione 1,00, richiamo 0,85. 0 = guardiano spento.
+    abstention_idf_threshold: float = 5.5
+    # Document frequency dei termini del corpus, rigenerata dall'ingest (gitignorata).
+    term_df_path: str = "data/term_df.json"
+
+    # --- Router aggregativo e guardia verbatim (incremento 1) ---
+    # Il router riconosce le domande di conteggio/elenco e le instrada su una query
+    # calcolata sui metadati. Spegnibile per rigiocare le run precedenti.
+    router_enabled: bool = True
+    # Governa la *richiesta* dello span letterale al modello (cambia lo schema di output,
+    # e quindi il prefisso cache-friendly: spegnendolo si torna al contratto precedente).
+    verbatim_enabled: bool = True
+    # Quota minima di claim con verbatim verificato perché la risposta venga servita.
+    # 0 = guardia SPENTA, si misura soltanto. Come `abstention_idf_threshold`, si tara su
+    # una run di misura invece di sceglierla a occhio.
+    verbatim_min_valid_ratio: float = 0.0
+    # Sotto questa lunghezza uno span conta come NON valido anche se la substring esiste:
+    # il test di appartenenza diventa banalmente soddisfacibile.
+    verbatim_min_chars: int = 40
+    # Righe mostrate nella risposta aggregativa. L'audit le porta comunque tutte.
+    structured_max_rows: int = 20
+
+    # --- Pricing (M1: da confermare in console La Plateforme) — EUR/USD per 1M token ---
+    price_input_per_mtok: float = 0.0
+    price_output_per_mtok: float = 0.0
+    price_cached_per_mtok: float = 0.0
+
+    # --- Logging / audit ---
+    log_level: str = "info"
+    audit_log_dir: str = "logs"
+
+    def with_overrides(self, **kwargs) -> RagConfig:
+        """Ritorna una copia con i campi indicati sovrascritti (per lo sweep d'eval)."""
+        return replace(self, **kwargs)
+
+    @property
+    def chunk_overlap_tokens(self) -> int:
+        return max(0, round(self.chunk_tokens * self.chunk_overlap_ratio))
+
+    @classmethod
+    def from_env(cls) -> RagConfig:
+        """Costruisce la config leggendo l'ambiente (una sola volta, esplicitamente)."""
+        return cls(
+            mistral_api_key=_get("MISTRAL_API_KEY", "") or "",
+            mistral_base_url=_get("MISTRAL_BASE_URL", cls.mistral_base_url),
+            mistral_model=_get("MISTRAL_MODEL", cls.mistral_model),
+            mistral_embed_model=_get("MISTRAL_EMBED_MODEL", cls.mistral_embed_model),
+            embed_dim=_get_int("EMBED_DIM", cls.embed_dim),
+            llm_temperature=_get_float("LLM_TEMPERATURE", cls.llm_temperature),
+            max_output_tokens=_get_int("MAX_OUTPUT_TOKENS", cls.max_output_tokens),
+            llm_seed=(int(_get("LLM_SEED")) if _get("LLM_SEED") else None),
+            http_timeout_s=_get_float("HTTP_TIMEOUT_S", cls.http_timeout_s),
+            http_connect_timeout_s=_get_float("HTTP_CONNECT_TIMEOUT_S", cls.http_connect_timeout_s),
+            http_max_retries=_get_int("HTTP_MAX_RETRIES", cls.http_max_retries),
+            chroma_persist_dir=_get("CHROMA_PERSIST_DIR", cls.chroma_persist_dir),
+            chroma_collection_retrieval=_get("CHROMA_COLLECTION_RETRIEVAL", cls.chroma_collection_retrieval),
+            chroma_collection_cache=_get("CHROMA_COLLECTION_CACHE", cls.chroma_collection_cache),
+            chunk_tokens=_get_int("CHUNK_TOKENS", cls.chunk_tokens),
+            chunk_overlap_ratio=_get_float("CHUNK_OVERLAP_RATIO", cls.chunk_overlap_ratio),
+            hybrid_vector_weight=_get_float("HYBRID_VECTOR_WEIGHT", cls.hybrid_vector_weight),
+            hybrid_keyword_weight=_get_float("HYBRID_KEYWORD_WEIGHT", cls.hybrid_keyword_weight),
+            rrf_constant=_get_int("RRF_CONSTANT", cls.rrf_constant),
+            rag_top_k=_get_int("RAG_TOP_K", cls.rag_top_k),
+            whoosh_index_dir=_get("WHOOSH_INDEX_DIR", cls.whoosh_index_dir),
+            support_threshold=_get_float("SUPPORT_THRESHOLD", cls.support_threshold),
+            cache_sim_threshold=_get_float("CACHE_SIM_THRESHOLD", cls.cache_sim_threshold),
+            abstention_idf_threshold=_get_float("ABSTENTION_IDF_THRESHOLD", cls.abstention_idf_threshold),
+            term_df_path=_get("TERM_DF_PATH", cls.term_df_path),
+            router_enabled=_get_bool("ROUTER_ENABLED", cls.router_enabled),
+            verbatim_enabled=_get_bool("VERBATIM_ENABLED", cls.verbatim_enabled),
+            verbatim_min_valid_ratio=_get_float("VERBATIM_MIN_VALID_RATIO", cls.verbatim_min_valid_ratio),
+            verbatim_min_chars=_get_int("VERBATIM_MIN_CHARS", cls.verbatim_min_chars),
+            structured_max_rows=_get_int("STRUCTURED_MAX_ROWS", cls.structured_max_rows),
+            price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", cls.price_input_per_mtok),
+            price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", cls.price_output_per_mtok),
+            price_cached_per_mtok=_get_float("PRICE_CACHED_PER_MTOK", cls.price_cached_per_mtok),
+            log_level=_get("LOG_LEVEL", cls.log_level),
+            audit_log_dir=_get("AUDIT_LOG_DIR", cls.audit_log_dir),
+        )
+
+
+# Radice del repo, utile a ingest/audit per path relativi stabili.
+REPO_ROOT = Path(__file__).resolve().parent
