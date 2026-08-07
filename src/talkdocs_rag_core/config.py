@@ -56,6 +56,36 @@ def _get_opt_float(name: str) -> float | None:
     return float(raw) if raw is not None else None
 
 
+_TRUE_VALUES = ("1", "true", "yes", "on", "si", "sì")
+_FALSE_VALUES = ("0", "false", "no", "off")
+
+
+def _get_bool(name: str, default: bool) -> bool:
+    """Flag booleano, con lo stesso patto di ``_get_float``/``_get_int``: assente → default,
+    non interpretabile → ``ValueError``.
+
+    Un valore non riconosciuto **non** vale ``False``. Un flag scritto male
+    (``ROUTER_ENABLED=tru``, ``VERBATIM_ENABLED=Y``) sarebbe indistinguibile da uno
+    spegnimento voluto: spegnerebbe in silenzio il meccanismo che governa, ed è
+    esattamente la classe di guasto già pagata con ``SUPPORT_THRESHOLD`` lasciata vuota —
+    il rifiuto deterministico non scattava mai e nessuno se ne accorgeva.
+
+    Le forme italiane sono accettate perché l'``.env`` si compila a mano.
+    """
+    raw = _get(name)
+    if raw is None:
+        return default
+    val = raw.lower()
+    if val in _TRUE_VALUES:
+        return True
+    if val in _FALSE_VALUES:
+        return False
+    raise ValueError(
+        f"{name}: valore booleano non riconosciuto {raw!r}. "
+        f"Attesi {'/'.join(_TRUE_VALUES)} oppure {'/'.join(_FALSE_VALUES)}."
+    )
+
+
 @dataclass(frozen=True)
 class RagConfig:
     """Parametri di una run. Frozen: per variare un parametro si usa ``with_overrides``."""
@@ -70,7 +100,12 @@ class RagConfig:
 
     # --- Inferenza (riproducibilità) ---
     llm_temperature: float = 0.0
-    max_output_tokens: int = 512
+    # Tarato sui dati, non scelto a occhio: nella run `eval-20260807T170947Z` le risposte
+    # non troncate avevano mediana 207 token, 90° percentile 362, massimo 476 — cioè una
+    # risposta lunga legittima sfiorava il vecchio tetto di 512, e 8 andavano a sbattere.
+    # 1024 è ~2,1× il 90° percentile. Il tetto resta, e il troncamento resta un esito
+    # dichiarato (`truncated`/`finish_reason` in audit): non è stato tolto, è stato alzato.
+    max_output_tokens: int = 1024
     llm_seed: int | None = None
 
     # --- Trasporto HTTP verso La Plateforme ---
@@ -112,6 +147,23 @@ class RagConfig:
     abstention_idf_threshold: float = 5.5
     # Document frequency dei termini del corpus, rigenerata dall'ingest (gitignorata).
     term_df_path: str = "data/term_df.json"
+
+    # --- Router aggregativo e guardia verbatim (incremento 1) ---
+    # Il router riconosce le domande di conteggio/elenco e le instrada su una query
+    # calcolata sui metadati. Spegnibile per rigiocare le run precedenti.
+    router_enabled: bool = True
+    # Governa la *richiesta* dello span letterale al modello (cambia lo schema di output,
+    # e quindi il prefisso cache-friendly: spegnendolo si torna al contratto precedente).
+    verbatim_enabled: bool = True
+    # Quota minima di claim con verbatim verificato perché la risposta venga servita.
+    # 0 = guardia SPENTA, si misura soltanto. Come `abstention_idf_threshold`, si tara su
+    # una run di misura invece di sceglierla a occhio.
+    verbatim_min_valid_ratio: float = 0.0
+    # Sotto questa lunghezza uno span conta come NON valido anche se la substring esiste:
+    # il test di appartenenza diventa banalmente soddisfacibile.
+    verbatim_min_chars: int = 40
+    # Righe mostrate nella risposta aggregativa. L'audit le porta comunque tutte.
+    structured_max_rows: int = 20
 
     # --- Pricing (M1: da confermare in console La Plateforme) — EUR/USD per 1M token ---
     price_input_per_mtok: float = 0.0
@@ -159,6 +211,11 @@ class RagConfig:
             cache_sim_threshold=_get_float("CACHE_SIM_THRESHOLD", cls.cache_sim_threshold),
             abstention_idf_threshold=_get_float("ABSTENTION_IDF_THRESHOLD", cls.abstention_idf_threshold),
             term_df_path=_get("TERM_DF_PATH", cls.term_df_path),
+            router_enabled=_get_bool("ROUTER_ENABLED", cls.router_enabled),
+            verbatim_enabled=_get_bool("VERBATIM_ENABLED", cls.verbatim_enabled),
+            verbatim_min_valid_ratio=_get_float("VERBATIM_MIN_VALID_RATIO", cls.verbatim_min_valid_ratio),
+            verbatim_min_chars=_get_int("VERBATIM_MIN_CHARS", cls.verbatim_min_chars),
+            structured_max_rows=_get_int("STRUCTURED_MAX_ROWS", cls.structured_max_rows),
             price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", cls.price_input_per_mtok),
             price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", cls.price_output_per_mtok),
             price_cached_per_mtok=_get_float("PRICE_CACHED_PER_MTOK", cls.price_cached_per_mtok),

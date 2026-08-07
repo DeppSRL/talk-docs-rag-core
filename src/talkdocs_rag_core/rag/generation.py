@@ -22,7 +22,9 @@ from config import RagConfig
 from vendor.talkdocs.services.hybrid_search import HybridSearchResult
 
 from .guard import TermStats, abstention_signal
+from .outcomes import StructuredOutcome, VerbatimOutcome
 from .schema import STRUCTURED_RESPONSE_SCHEMA, StructuredAnswer
+from .verbatim import verifica
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,10 @@ SYSTEM_PREFIX = (
     "4. Se i passaggi non contengono l'informazione, dichiaralo e non inventare.\n"
     "5. Restituisci un oggetto JSON con: 'answer' (testo con citazioni [n]) e 'claims' "
     "(lista di {statement, passages}), dove 'passages' elenca i numeri dei passaggi che "
-    "sostengono ciascuna affermazione."
+    "sostengono ciascuna affermazione.\n"
+    "6. Per ogni claim riporta in 'verbatim' le parole ESATTE del passaggio che sostengono "
+    "l'affermazione, copiate alla lettera e non parafrasate. Se non trovi parole che la "
+    "sostengano, non fare quell'affermazione."
 )
 
 _MARKER_RE = re.compile(r"\[(\d+)\]")
@@ -110,6 +115,15 @@ class RagResult:
     latency_s: float | None = None  # monotonico (perf_counter): NON avanza durante un suspend
     latency_wall_s: float | None = None  # wall-clock: se divergono, la macchina ha dormito
     extra: dict = field(default_factory=dict)
+    # --- Router e guardia verbatim (incremento 1) ---
+    # "pointwise" | "structured" | "uncovered". Registrato sempre: distingue in audit un
+    # POINTWISE legittimo da un fall-through del router lessicale (spec §7).
+    route: str = "pointwise"
+    router_signals: dict = field(default_factory=dict)
+    structured: StructuredOutcome | None = None
+    verbatim: VerbatimOutcome | None = None
+    # Motivo dell'astensione: "termini_mancanti" (guardiano IDF) | "verbatim".
+    uncertain_reason: str | None = None
 
 
 def _support_score(results: list[HybridSearchResult]) -> float:
@@ -123,6 +137,25 @@ def _build_passages(results: list[HybridSearchResult], top_k: int) -> list[Passa
     for i, r in enumerate(results[:top_k], start=1):
         passages.append(Passage(n=i, chunk_id=r.chunk_id, source=r.source, content=r.content))
     return passages
+
+
+def _usage_dict(response) -> dict:
+    """``usage`` normalizzato dalla risposta del provider (``{}`` se il provider non lo espone).
+
+    Estratto in una funzione perché serve in **due** punti d'uscita: la risposta servita e
+    l'astensione da guardia verbatim, che esce dopo aver già speso i token.
+    """
+    u = getattr(response, "usage", None)
+    if u is None:
+        return {}
+    details = getattr(u, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", 0) if details else 0
+    return {
+        "prompt_tokens": u.prompt_tokens,
+        "completion_tokens": u.completion_tokens,
+        "total_tokens": u.total_tokens,
+        "cached_tokens": cached or 0,
+    }
 
 
 def _format_passages(passages: list[Passage]) -> str:
@@ -141,33 +174,60 @@ class MistralGenerator:
         self.term_stats = term_stats
 
     def _uncertain_result(
-        self, query: str, support: float, passages: list[Passage], segnale: float, mancanti: list[str]
+        self,
+        query: str,
+        support: float,
+        passages: list[Passage],
+        segnale: float,
+        mancanti: list[str],
+        motivo: str = "termini_mancanti",
+        verbatim: VerbatimOutcome | None = None,
+        usage: dict | None = None,
+        raw_output: str = "",
     ) -> RagResult:
-        """Risposta di incertezza, **deterministica**: nessuna chiamata al modello.
+        """Risposta di incertezza. Il **testo** non è mai generato dal modello.
 
-        Costruirla col modello aggiungerebbe una superficie di allucinazione proprio nel ramo
+        Costruirlo col modello aggiungerebbe una superficie di allucinazione proprio nel ramo
         che serve a evitarle (e un costo).
+
+        `usage` e `raw_output` distinguono i due motivi, e la distinzione è di merito, non di
+        forma. L'astensione per `termini_mancanti` esce **prima** della chiamata: lì `{}` e `""`
+        sono la verità, e riempirli fingerebbe un costo mai sostenuto. L'astensione per
+        `verbatim` arriva **dopo**: i token sono stati spesi comunque, e azzerarli farebbe
+        sparire dalle metriche il costo delle domande peggiori — proprio quelle su cui si
+        decide se la guardia conviene.
 
         I termini mancanti **non** compaiono nel messaggio, pur restando nell'audit. Misurato:
         il segnale non distingue *registro* da *specificità* — «premi» (df 5) e «nato» (df 7)
         sono più rari di «premiali» (df 49) — quindi su una domanda colloquiale l'astensione è
         giusta nell'esito ma la spiegazione sarebbe fuorviante («non compare "soldi"» non dice
         nulla a un cittadino). Si dichiara l'incertezza e si mostra cosa si è trovato.
+
+        Due motivi, due testi: l'astensione da guardia verbatim arriva *dopo* la generazione e
+        non è un problema di riformulazione della domanda — suggerirla sarebbe fuorviante.
         """
-        fonti = []
-        for p in passages:
-            if p.source not in fonti:
-                fonti.append(p.source)
-        elenco = "; ".join(fonti[:5]) or "nessun documento"
-        return RagResult(
-            query=query,
-            answer_text=(
+        if motivo == "verbatim":
+            testo = (
+                "Non posso rispondere con certezza: le affermazioni che avrei prodotto non "
+                "risultano sostenute alla lettera dai documenti recuperati. Preferisco non "
+                "presentarle piuttosto che presentarle senza una citazione verificata."
+            )
+        else:
+            fonti = []
+            for p in passages:
+                if p.source not in fonti:
+                    fonti.append(p.source)
+            elenco = "; ".join(fonti[:5]) or "nessun documento"
+            testo = (
                 "Non posso rispondere con certezza: nei documenti che ho trovato non c'è un "
                 "passaggio che risponda con precisione a questa domanda. "
                 f"Ho trovato però documenti in tema: {elenco}. "
                 "Prova a riformulare in modo più specifico — per esempio indicando l'anno, il "
                 "numero della delibera, o la denominazione esatta del fondo o dell'opera."
-            ),
+            )
+        return RagResult(
+            query=query,
+            answer_text=testo,
             refused=False,
             refusal_reason=None,
             support_score=support,
@@ -176,13 +236,15 @@ class MistralGenerator:
             invalid_citations=[],
             claims=[],
             passages=passages,
-            usage={},
-            raw_output="",
+            usage=usage or {},
+            raw_output=raw_output,
             model=self.cfg.mistral_model,
             params=self._params(),
             uncertain=True,
             missing_terms=mancanti,
             abstention_signal=segnale,
+            uncertain_reason=motivo,
+            verbatim=verbatim,
         )
 
     def _refusal_result(self, query: str, support: float, passages: list[Passage]) -> RagResult:
@@ -319,18 +381,35 @@ class MistralGenerator:
 
         structured, valid, invalid = self._parse(raw, len(passages))
         cited_chunk_ids = [passages[n - 1].chunk_id for n in valid]
+        # L'usage si estrae **qui**, non al momento di costruire la risposta servita: la
+        # guardia verbatim può uscire prima, e i token della chiamata sono già stati spesi.
+        usage = _usage_dict(response)
 
-        usage = {}
-        if response.usage is not None:
-            u = response.usage
-            details = getattr(u, "prompt_tokens_details", None)
-            cached = getattr(details, "cached_tokens", 0) if details else 0
-            usage = {
-                "prompt_tokens": u.prompt_tokens,
-                "completion_tokens": u.completion_tokens,
-                "total_tokens": u.total_tokens,
-                "cached_tokens": cached or 0,
-            }
+        # --- Guardia verbatim (C3c): le parole dichiarate esistono dove il modello dice? ---
+        # A differenza dell'astensione IDF, questa arriva **dopo** la chiamata: l'astensione
+        # porta con sé `usage` e `raw_output` reali, altrimenti con la guardia accesa il costo
+        # sparirebbe dalle metriche proprio sulle domande peggiori.
+        esito_verbatim = None
+        if self.cfg.verbatim_enabled:
+            esito_verbatim = verifica(
+                [c.model_dump() for c in structured.claims], passages, self.cfg.verbatim_min_chars
+            )
+            if (
+                self.cfg.verbatim_min_valid_ratio > 0
+                and esito_verbatim.valid_ratio is not None
+                and esito_verbatim.valid_ratio < self.cfg.verbatim_min_valid_ratio
+            ):
+                logger.warning(
+                    "Verbatim sotto soglia (%.2f < %.2f) su «%.60s»: astensione",
+                    esito_verbatim.valid_ratio,
+                    self.cfg.verbatim_min_valid_ratio,
+                    query,
+                )
+                return self._uncertain_result(
+                    query, support, passages, segnale, mancanti,
+                    motivo="verbatim", verbatim=esito_verbatim,
+                    usage=usage, raw_output=raw,
+                )
 
         return RagResult(
             query=query,
@@ -354,4 +433,5 @@ class MistralGenerator:
             truncated=truncated,
             finish_reason=finish_reason,
             cache_kind="provider" if usage.get("cached_tokens") else None,
+            verbatim=esito_verbatim,
         )

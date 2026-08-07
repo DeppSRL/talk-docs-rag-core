@@ -12,7 +12,7 @@ Citare "CIPE n. 75/2021" sarebbe un errore di merito, non di forma.
 
 import pytest
 
-from ingest.parsers import titolo_delibera
+from ingest.parsers import metadati_delibera, titolo_delibera
 
 
 @pytest.mark.parametrize(
@@ -82,3 +82,29 @@ def test_parse_file_txt_generico_resta_sul_nome(tmp_path):
     p.write_text("contenuto", encoding="utf-8")
     _, title = parse_file(p)
     assert title == "nota-di-metodo"
+
+
+def test_metadati_delibera_campi_tipizzati():
+    """Lo store strutturato ha bisogno dei campi, non del titolo composto."""
+    assert metadati_delibera("E210075") == {
+        "codice": "E210075",
+        "numero": 75,
+        "anno": 2021,
+        "comitato": "CIPESS",
+    }
+
+
+def test_metadati_delibera_normalizza_il_codice_minuscolo():
+    """Nell'archivio 20 file hanno il prefisso minuscolo: il codice esce sempre maiuscolo."""
+    assert metadati_delibera("e190004finale_1")["codice"] == "E190004"
+
+
+def test_metadati_delibera_none_se_non_e_un_codice():
+    assert metadati_delibera("relazione-annuale") is None
+
+
+def test_metadati_delibera_e_titolo_condividono_la_regola():
+    """Se le due funzioni divergono, le citazioni e i conteggi raccontano cose diverse."""
+    for stem in ("E200080", "E210001", "E670001", "E000001"):
+        meta = metadati_delibera(stem)
+        assert titolo_delibera(stem) == f"Delibera {meta['comitato']} n. {meta['numero']}/{meta['anno']}"

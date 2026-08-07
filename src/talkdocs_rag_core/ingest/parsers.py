@@ -26,19 +26,36 @@ PIVOT_SECOLO = 67
 PRIMO_ANNO_CIPESS = 2021
 
 
-def titolo_delibera(stem: str) -> str | None:
-    """``'E210075'`` → ``'Delibera CIPESS n. 75/2021'``. ``None`` se non è un codice.
+def metadati_delibera(stem: str) -> dict | None:
+    """``'E210075'`` → ``{'codice': 'E210075', 'numero': 75, 'anno': 2021, 'comitato': 'CIPESS'}``.
 
-    Il titolo entra nelle citazioni: deve essere deterministico e nominare il comitato
-    con la denominazione vigente nell'anno dell'atto.
+    ``None`` se il nome file non porta un codice delibera. **Unica sede** della regola sul
+    pivot di secolo e sul cambio di denominazione CIPE→CIPESS: ``titolo_delibera`` e lo
+    store strutturato la leggono da qui invece di riscriverla.
     """
     m = CODICE_DELIBERA.match(stem)
     if not m:
         return None
     yy, numero = int(m.group(1)), int(m.group(2))
     anno = 1900 + yy if yy >= PIVOT_SECOLO else 2000 + yy
-    comitato = "CIPESS" if anno >= PRIMO_ANNO_CIPESS else "CIPE"
-    return f"Delibera {comitato} n. {numero}/{anno}"
+    return {
+        "codice": f"E{m.group(1)}{m.group(2)}",
+        "numero": numero,
+        "anno": anno,
+        "comitato": "CIPESS" if anno >= PRIMO_ANNO_CIPESS else "CIPE",
+    }
+
+
+def titolo_delibera(stem: str) -> str | None:
+    """``'E210075'`` → ``'Delibera CIPESS n. 75/2021'``. ``None`` se non è un codice.
+
+    Il titolo entra nelle citazioni: deve essere deterministico e nominare il comitato
+    con la denominazione vigente nell'anno dell'atto.
+    """
+    meta = metadati_delibera(stem)
+    if meta is None:
+        return None
+    return f"Delibera {meta['comitato']} n. {meta['numero']}/{meta['anno']}"
 
 
 def parse_file(path: Path) -> tuple[str, str]:

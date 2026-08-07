@@ -61,6 +61,16 @@ class AuditRecord:
     latency_s: float | None = None  # monotonico: latenza vera del servizio
     latency_wall_s: float | None = None  # wall-clock: include eventuale suspend della macchina
     extra: dict = field(default_factory=dict)
+    # --- Router e guardia verbatim (incremento 1) ---
+    # Registrati SEMPRE, anche quando non fanno scattare nulla: le soglie si ritarano su
+    # run passate senza rigiocarle, com'è già per `abstention_signal`.
+    route: str = "pointwise"
+    router_signals: dict = field(default_factory=dict)
+    # Sul ramo aggregativo la tupla deve permettere di RIESEGUIRE la query: sql + params +
+    # corpus_version. È la citazione, non un dettaglio diagnostico.
+    structured: dict | None = None
+    verbatim: dict | None = None
+    uncertain_reason: str | None = None
 
 
 def _chunk_hashes(result: RagResult) -> list[str]:
@@ -118,6 +128,11 @@ class AuditWriter:
             raw_output=result.raw_output,
             latency_s=result.latency_s,
             latency_wall_s=result.latency_wall_s,
+            route=result.route,
+            router_signals=result.router_signals,
+            structured=asdict(result.structured) if result.structured else None,
+            verbatim=asdict(result.verbatim) if result.verbatim else None,
+            uncertain_reason=result.uncertain_reason,
         )
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")

@@ -62,17 +62,20 @@ _RADICE = 6
 _MIN_LEN = 4
 # Sillabazione da estrazione PDF: «intel- ligenza» va riunito prima di cercare i termini.
 # Misurato: era la causa degli unici 2 falsi allarmi del guardiano.
-_SILLABAZIONE = re.compile(r"(?<=[a-zà-ù])-\s+(?=[a-zà-ù])")
+# Pubblica insieme a `normalizza`: `rag.verbatim` le riusa, e due nozioni diverse di «stessa
+# stringa» nello stesso sistema sono un guasto che si manifesta mesi dopo.
+SILLABAZIONE = re.compile(r"(?<=[a-zà-ù])-\s+(?=[a-zà-ù])")
 
 
-def _normalizza(testo: str) -> str:
+def normalizza(testo: str) -> str:
+    """Nozione minima di «stessa stringa» del sistema: minuscole e apostrofi unificati."""
     return testo.lower().replace("’", "'")
 
 
 def _radici(testo: str, *, desillaba: bool = False) -> set[str]:
-    t = _normalizza(testo)
+    t = normalizza(testo)
     if desillaba:
-        t = _SILLABAZIONE.sub("", t)
+        t = SILLABAZIONE.sub("", t)
     # Le elisioni si spezzano sull'apostrofo: «dell'opera» → «opera».
     return {w[:_RADICE] for pezzo in t.split("'") for w in _TOKEN.findall(pezzo) if len(w) >= _MIN_LEN}
 
@@ -80,7 +83,7 @@ def _radici(testo: str, *, desillaba: bool = False) -> set[str]:
 def content_terms(query: str) -> list[str]:
     """Termini di contenuto della domanda, ordinati, senza duplicati."""
     out = set()
-    for pezzo in _normalizza(query).split("'"):
+    for pezzo in normalizza(query).split("'"):
         for t in _TOKEN.findall(pezzo):
             if len(t) >= _MIN_LEN and t not in STOPWORDS:
                 out.add(t)

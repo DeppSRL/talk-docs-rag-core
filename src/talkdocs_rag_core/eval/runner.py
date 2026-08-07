@@ -38,6 +38,12 @@ class EvalItem:
     category: str
     expect_refuse: bool | None
     question: str
+    # Via attesa: "structured" | "refuse" | "pointwise". Campo, non categoria nuova: le
+    # categorie sono già cinque e moltiplicarle le renderebbe illeggibili.
+    route_attesa: str | None = None
+    # Verità numerica per le risposte calcolate. Confronto esatto: a un COUNT non si
+    # concede tolleranza.
+    expected_value: int | None = None
 
 
 def _load_set(path: Path) -> list[EvalItem]:
@@ -47,7 +53,12 @@ def _load_set(path: Path) -> list[EvalItem]:
         if not line:
             continue
         d = json.loads(line)
-        items.append(EvalItem(d["id"], d["category"], d.get("expect_refuse"), d["question"]))
+        items.append(
+            EvalItem(
+                d["id"], d["category"], d.get("expect_refuse"), d["question"],
+                d.get("route_attesa"), d.get("expected_value"),
+            )
+        )
     return items
 
 
@@ -71,7 +82,19 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res) -> dict:
     # rifiuto contano insieme: la domanda è «il sistema si è trattenuto quando doveva?».
     declined = bool(res.refused) or bool(res.uncertain)
     answered = not declined
-    source_ok = answered and len(res.cited_chunk_ids) > 0
+    route = getattr(res, "route", "pointwise")
+    strutturata = route == "structured"
+    # La fonte di una risposta calcolata è la query eseguita, non un chunk_id: senza questo
+    # ramo la metrica segnerebbe «senza fonte» una risposta perfetta.
+    source_ok = answered and (strutturata or len(res.cited_chunk_ids) > 0)
+
+    valore = res.structured.computed_value if (strutturata and res.structured) else None
+    if item.expected_value is None or valore is None:
+        value_ok = ""
+    else:
+        value_ok = int(valore == item.expected_value)
+    route_ok = "" if item.route_attesa is None else int(route == item.route_attesa)
+    vb = getattr(res, "verbatim", None)
     if item.expect_refuse is None:
         refusal_correct = ""  # non punteggiato (es. categoria `vaga`)
     else:
@@ -91,6 +114,16 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res) -> dict:
         "source_id_ok": int(source_ok) if answered else "",
         "n_citations": len(res.cited_chunk_ids),
         "invalid_citations": len(res.invalid_citations),
+        "route": route,
+        "route_attesa": item.route_attesa or "",
+        "route_ok": route_ok,
+        "expected_value": item.expected_value if item.expected_value is not None else "",
+        "computed_value": valore if valore is not None else "",
+        "value_ok": value_ok,
+        "verbatim_valid_ratio": "" if not vb or vb.valid_ratio is None else round(vb.valid_ratio, 3),
+        "verbatim_misattributed": vb.n_misattributed if vb else "",
+        "verbatim_not_found": vb.n_not_found if vb else "",
+        "uncertain_reason": getattr(res, "uncertain_reason", None) or "",
         "from_cache_semantic": int(res.from_cache and res.cache_kind == "semantic"),
         "prompt_tokens": usage.get("prompt_tokens", 0),
         "completion_tokens": usage.get("completion_tokens", 0),
@@ -107,6 +140,11 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res) -> dict:
 
 def _verdict(res) -> str:
     """Etichetta compatta dell'esito, per la riga di progresso."""
+    if getattr(res, "route", "pointwise") == "structured" and res.structured is not None:
+        s = res.structured
+        return f"CALCOLATA ({s.intent}) → {s.computed_value}  righe={s.n_rows}  [0 chiamate]"
+    if getattr(res, "route", "pointwise") == "uncovered":
+        return "RIFIUTO DICHIARATO (aggregazione fuori copertura)"
     if res.from_cache and res.cache_kind == "semantic":
         sim = res.extra.get("cache_similarity")
         return f"HIT-semantica{f' (sim {sim:.3f})' if sim is not None else ''}"
@@ -179,6 +217,12 @@ def _aggregate(cfg: RagConfig, rows: list[dict], condition: str) -> dict:
         if isinstance(r.get("latency_wall_s"), (int, float)) and isinstance(r["latency_s"], (int, float))
     )
 
+    attesi_strutturati = [r for r in sub if r["route_attesa"] == "structured"]
+    attesi_puntuali = [r for r in sub if r["route_attesa"] == "pointwise"]
+    con_route = [r for r in sub if r["route_ok"] != ""]
+    con_valore = [r for r in sub if r["value_ok"] != ""]
+    ratios = [r["verbatim_valid_ratio"] for r in sub if r["verbatim_valid_ratio"] != ""]
+
     def rate(num, den):
         return round(num / den, 3) if den else 0.0
 
@@ -204,6 +248,20 @@ def _aggregate(cfg: RagConfig, rows: list[dict], condition: str) -> dict:
         "n_uncertain": n_uncertain,
         "n_answered": len(answered),
         "n_truncated": sum(r.get("truncated", 0) for r in sub),
+        "routing_accuracy": rate(sum(int(r["route_ok"]) for r in con_route), len(con_route)),
+        # Due errori in direzioni opposte: mai una media unica.
+        "router_recall": rate(
+            sum(1 for r in attesi_strutturati if r["route"] == "structured"), len(attesi_strutturati)
+        ),
+        "router_false_positive": rate(
+            sum(1 for r in attesi_puntuali if r["route"] != "pointwise"), len(attesi_puntuali)
+        ),
+        "structured_value_accuracy": rate(sum(int(r["value_ok"]) for r in con_valore), len(con_valore)),
+        "verbatim_valid_ratio": round(statistics.mean(ratios), 3) if ratios else 0.0,
+        "verbatim_misattributed": sum(int(r["verbatim_misattributed"] or 0) for r in sub),
+        "verbatim_not_found": sum(int(r["verbatim_not_found"] or 0) for r in sub),
+        "n_structured": sum(1 for r in sub if r["route"] == "structured"),
+        "n_uncovered": sum(1 for r in sub if r["route"] == "uncovered"),
     }
 
 
@@ -299,6 +357,30 @@ def _markdown(
         "> segnale ortogonale al `support_score`, che misura vicinanza di argomento e non",
         "> presenza della risposta. Non intercetta le domande di aggregazione (lì i termini ci",
         "> sono tutti, manca la vista d'insieme): quelle richiedono una query sui metadati.",
+    ]
+
+    lines += [
+        "",
+        "## Routing e provenienza (incremento 1)",
+        "",
+        "> ⚠ Schema di output e `SYSTEM_PREFIX` sono cambiati: il prefisso cache-friendly è",
+        "> diverso da quello delle run precedenti. **L'A/B del caching è ri-baselinato**: i",
+        "> numeri di questa run non sono confrontabili con quelli antecedenti l'incremento 1.",
+        "",
+        "| Metrica | OFF | ON |",
+        "|---|---|---|",
+        f"| Accuratezza di routing | {pct(agg_off['routing_accuracy'])} | {pct(agg_on['routing_accuracy'])} |",
+        f"| Richiamo del router | {pct(agg_off['router_recall'])} | {pct(agg_on['router_recall'])} |",
+        f"| Falsi positivi del router | {pct(agg_off['router_false_positive'])} "
+        f"| {pct(agg_on['router_false_positive'])} |",
+        f"| Correttezza dei valori calcolati | {pct(agg_off['structured_value_accuracy'])} "
+        f"| {pct(agg_on['structured_value_accuracy'])} |",
+        f"| Risposte calcolate / rifiuti dichiarati | {agg_off['n_structured']} / {agg_off['n_uncovered']} "
+        f"| {agg_on['n_structured']} / {agg_on['n_uncovered']} |",
+        f"| Quota media di verbatim validi | {pct(agg_off['verbatim_valid_ratio'])} "
+        f"| {pct(agg_on['verbatim_valid_ratio'])} |",
+        f"| Span misattribuiti / non trovati | {agg_off['verbatim_misattributed']} / "
+        f"{agg_off['verbatim_not_found']} | {agg_on['verbatim_misattributed']} / {agg_on['verbatim_not_found']} |",
     ]
 
     drift = max(agg_off["suspend_drift_s"], agg_on["suspend_drift_s"])

@@ -6,13 +6,28 @@ richiesta (``prompt_cache_key``); la cache semantica è governata da ``use_cache
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from cache.semantic import SemanticCache
 from config import REPO_ROOT, RagConfig
+from rag import router
 from rag.generation import MistralGenerator, RagResult
+from structured.service import serve_structured, serve_uncovered
+from structured.store import StructuredStore
+
+logger = logging.getLogger(__name__)
+
+
+def _finish(res: RagResult, t0: float, w0: float) -> RagResult:
+    """Chiude i due orologi. Sono quattro i punti di uscita di `ask`: dimenticarne uno
+    corromperebbe la latenza di una run in silenzio, ed è per non accorgersene che il
+    doppio orologio esiste."""
+    res.latency_s = time.perf_counter() - t0
+    res.latency_wall_s = time.time() - w0
+    return res
 
 
 def load_corpus_version(corpus_dir: Path | None = None) -> str:
@@ -32,6 +47,9 @@ class RagPipeline:
     generator: MistralGenerator
     semantic_cache: SemanticCache
     corpus_version: str
+    # Tabella dei metadati per il ramo aggregativo. `None` = nessun manifest: il router
+    # non instrada e la pipeline si comporta come prima.
+    store: StructuredStore | None = None
 
     async def ask(self, query: str, use_cache: bool, provider_cache_key: str | None = None) -> RagResult:
         """Serve una domanda.
@@ -47,6 +65,28 @@ class RagPipeline:
         # invece di produrre una media silenziosamente sbagliata.
         t0 = time.perf_counter()
         w0 = time.time()
+
+        # --- Router (incremento 1) ---
+        # PRIMA della cache semantica, non dopo: la cache scatta a similarità ≥ 0,92 e
+        # «quante delibere nel 2024» contro «…nel 2023» ci sta sopra. Cachare questo ramo
+        # significherebbe servire il conteggio dell'anno sbagliato — esatto e credibile.
+        # Invariante: `signals` vuoto in audit = router spento — `classify()` popola sempre le cinque chiavi.
+        rotta = router.Route(router.POINTWISE)
+        if self.cfg.router_enabled:
+            rotta = router.classify(query)
+            if rotta.route == router.UNCOVERED:
+                return _finish(serve_uncovered(self.cfg, query, rotta), t0, w0)
+            if rotta.route == router.STRUCTURED:
+                if self.store is not None:
+                    return _finish(serve_structured(self.cfg, self.store, query, rotta), t0, w0)
+                # Il fall-through va contato, non dedotto a posteriori dai `router_signals`:
+                # la domanda è aggregativa e finisce nel ramo puntuale solo perché manca la
+                # tabella. Una riga per richiesta, non una per sessione.
+                logger.warning(
+                    "ramo aggregativo disattivato (manifest assente): domanda aggregativa "
+                    "servita dal ramo puntuale — query: %s",
+                    query[:120],
+                )
 
         # --- Cache semantica (C4b) ---
         if use_cache:
@@ -67,20 +107,22 @@ class RagPipeline:
                     raw_output="",
                     model=self.cfg.mistral_model,
                     params=self.generator._params(),
+                    router_signals=rotta.signals,
                     from_cache=True,
                     cache_kind="semantic",
-                    latency_s=time.perf_counter() - t0,
-                    latency_wall_s=time.time() - w0,
                     extra={"cache_similarity": hit.similarity, "matched_query": hit.matched_query},
                 )
-                return res
+                return _finish(res, t0, w0)
 
         # --- Retrieval + generazione ---
         results = await self.hybrid.search(query, top_k=self.cfg.rag_top_k)
         cache_key = provider_cache_key if provider_cache_key is not None else self.corpus_version
         res = self.generator.generate(query, results, cache_key=cache_key)
-        res.latency_s = time.perf_counter() - t0
-        res.latency_wall_s = time.time() - w0
+        res.router_signals = rotta.signals
+        # Gli orologi si fermano **prima** dello store in cache: scriverci dentro costa un
+        # embedding e una write su Chroma, e finirebbe nella latenza servita — falsando
+        # proprio il confronto A/B cache on/off che è il deliverable.
+        _finish(res, t0, w0)
 
         # --- Store in cache semantica (solo risposte servite e non rifiutate) ---
         if use_cache and not res.refused:
@@ -114,10 +156,15 @@ async def build_pipeline(cfg: RagConfig) -> RagPipeline:
     generator = MistralGenerator(cfg, client, term_stats=build_term_stats(cfg, chroma_client))
     semantic_cache = SemanticCache(cfg, embedding_service, chroma_client)
 
+    store = StructuredStore.from_path(REPO_ROOT / "corpus" / "manifest.json")
+    if store is None:
+        logger.warning("manifest.json assente: ramo aggregativo disattivato per questa sessione")
+
     return RagPipeline(
         cfg=cfg,
         hybrid=hybrid,
         generator=generator,
         semantic_cache=semantic_cache,
         corpus_version=load_corpus_version(),
+        store=store,
     )

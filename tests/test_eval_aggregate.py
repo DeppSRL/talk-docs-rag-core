@@ -14,6 +14,10 @@ from eval.runner import _aggregate
 
 
 def _riga(condition="off", **kw):
+    # Le colonne di routing/verbatim (incremento 1) sono lette **strette** da `_aggregate`:
+    # una metrica del deliverable che diventa silenziosamente 0.0 perché una colonna è
+    # sparita è peggio di un KeyError. Qui valgono "non punteggiato", come su una riga
+    # pointwise senza `route_attesa`.
     base = {
         "condition": condition,
         "refusal_correct": 1,
@@ -27,6 +31,13 @@ def _riga(condition="off", **kw):
         "total_tokens": 2100,
         "cost": 0.0004,
         "latency_s": 2.0,
+        "route": "pointwise",
+        "route_attesa": "",
+        "route_ok": "",
+        "value_ok": "",
+        "verbatim_valid_ratio": "",
+        "verbatim_misattributed": "",
+        "verbatim_not_found": "",
     }
     base.update(kw)
     return base
