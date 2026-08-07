@@ -100,7 +100,12 @@ class RagConfig:
 
     # --- Inferenza (riproducibilità) ---
     llm_temperature: float = 0.0
-    max_output_tokens: int = 512
+    # Tarato sui dati, non scelto a occhio: nella run `eval-20260807T170947Z` le risposte
+    # non troncate avevano mediana 207 token, 90° percentile 362, massimo 476 — cioè una
+    # risposta lunga legittima sfiorava il vecchio tetto di 512, e 8 andavano a sbattere.
+    # 1024 è ~2,1× il 90° percentile. Il tetto resta, e il troncamento resta un esito
+    # dichiarato (`truncated`/`finish_reason` in audit): non è stato tolto, è stato alzato.
+    max_output_tokens: int = 1024
     llm_seed: int | None = None
 
     # --- Trasporto HTTP verso La Plateforme ---
