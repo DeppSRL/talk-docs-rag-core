@@ -44,28 +44,43 @@ logger = logging.getLogger(__name__)
 # della query, non indovina il corpus.
 _ANNO_MIN, _ANNO_MAX = 1900, 2100
 
+# Le istruzioni dicono REGOLE, non esempi presi dall'eval set. Mettere in prompt le
+# domande su cui il router viene misurato (`ic-07`, `ag-01`, `oc-01`…) le farebbe passare
+# per costruzione e renderebbe la misura successiva priva di valore: si insegnerebbe al
+# test. Le poche formulazioni illustrative qui sotto sono inventate e non compaiono in
+# `eval/eval_set.jsonl`.
 _ISTRUZIONI = (
     "Sei il router di un sistema di domande e risposte su un corpus documentale. Il tuo "
     "UNICO compito è classificare la domanda dell'utente in una route. Non rispondi mai "
-    "alla domanda.\n\n"
+    "alla domanda, non giudichi se la risposta esista: decidi solo CHI deve cercarla.\n\n"
+    "La discriminante non è l'argomento della domanda, è DOVE STA LA RISPOSTA.\n\n"
     "Route disponibili:\n"
-    '- "pointwise": la risposta sta scritta in uno o pochi documenti; si risolve con '
-    "ricerca nei testi e citazioni. Vale anche per le domande su un importo o un valore "
-    "riportato in un documento preciso.\n"
-    '- "structured": conteggio, elenco o distribuzione per anno di DELIBERE del '
-    "Comitato, calcolabile sui metadati (anno, numero, comitato). Intenti disponibili:\n"
+    '- "pointwise": la risposta è scritta nel testo di uno o pochi documenti. È la route '
+    "PREDEFINITA: nel dubbio si sceglie questa, perché a valle il sistema ha già le sue "
+    "guardie e rifiuta da sé quando i documenti non bastano.\n"
+    "  Vi rientrano anche: le domande su un importo, una data, una percentuale o una "
+    "quantità RIPORTATI in un atto (un valore scritto è un fatto da leggere, non un "
+    "totale da calcolare — «quanto», «a quanto ammonta», «quante risorse» NON bastano a "
+    "spostare la domanda altrove); e le domande su un argomento estraneo al corpus, che "
+    "il sistema rifiuterà semplicemente perché non trova documenti pertinenti.\n"
+    '- "structured": conteggio, elenco o distribuzione di DELIBERE del Comitato, '
+    "calcolabile sui metadati (anno, numero, comitato). Intenti disponibili:\n"
     '  - "count_delibere" (parametri opzionali: "anno" oppure "anno_da"+"anno_a", "comitato")\n'
     '  - "list_delibere" (stessi parametri)\n'
     '  - "count_by_year" (parametro opzionale: "comitato")\n'
     '  "comitato" vale solo "CIPE" o "CIPESS". Un anno singolo e un intervallo sono '
-    "alternativi. Un insieme di anni sciolti NON è esprimibile: in quel caso la route "
-    'giusta è "uncovered".\n'
-    '- "uncovered": la domanda chiede un aggregato che i metadati non sanno calcolare — '
-    "totali e ammontari economici, quantità fisiche (chilometri, posti), conteggi su "
-    "oggetti che NON sono delibere del Comitato (atti di altri organi, documenti di "
-    "altra natura). Il sistema risponderà con un rifiuto motivato.\n"
-    '- "meta": la domanda riguarda la collezione stessa — che cos\'è, cosa contiene, che '
-    "periodo copre, come sono fatti i documenti, cosa si può chiedere.\n\n"
+    "alternativi. Senza alcun filtro il conteggio vale sull'intero corpus ed è "
+    "ugualmente calcolabile. Un insieme di anni sciolti NON è esprimibile: in quel caso "
+    'la route giusta è "uncovered".\n'
+    '- "uncovered": SOLO le domande che per rispondere richiederebbero di attraversare '
+    "molti documenti e sommare grandezze prese dai loro testi — spese complessive di un "
+    "settore in un periodo, quantità fisiche aggregate — oppure di contare oggetti che "
+    "NON sono delibere del Comitato. Non è la route del «non lo so»: è la route di un "
+    "calcolo che manca. Se la domanda non chiede un aggregato, non è questa.\n"
+    '- "meta": la domanda riguarda la collezione in quanto tale — che cos\'è, di che cosa '
+    "si occupa, che periodo copre, come sono fatti i documenti, cosa si può chiedere. "
+    "Chiedere QUANTE delibere ci sono non è una meta-domanda: è un conteggio "
+    '("structured").\n\n'
     "Rispondi SOLO con un oggetto JSON: "
     '{"route": "...", "intent": null | "...", "params": {}}. '
     '"intent" e "params" si valorizzano solo per "structured". Non inventare intenti, '
@@ -118,7 +133,13 @@ class AgenticRouter:
 
     def __init__(self, cfg: RagConfig, client: OpenAI, card: CorpusCard | None, corpus_version: str = ""):
         self.cfg = cfg
-        self.client = client
+        # Budget di retry PROPRIO, più alto di quello della generazione. Misurato sulla run
+        # `eval-20260808T122852Z`: 4 chiamate su 55 morte in `RateLimitError` e ricadute sul
+        # lessicale — fra queste tre delle sette aggregative, cioè il richiamo del router
+        # misurava la rete invece del classificatore. Il ramo agentico raddoppia le richieste
+        # al provider e l'eval le fa in sequenza stretta: è il punto della pipeline che tocca
+        # per primo il rate limit, e l'unico dove un fallimento si traveste da decisione.
+        self.client = client.with_options(max_retries=cfg.router_llm_max_retries)
         self.cache_key = f"router:{corpus_version}"
         scheda = card.text if card is not None else "(nessuna scheda compilata per questo corpus)"
         # Prefisso byte-identico a ogni richiesta, scheda inclusa: stesso principio

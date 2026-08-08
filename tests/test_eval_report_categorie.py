@@ -44,6 +44,7 @@ def _riga(category, condition="off", **kw):
         "verbatim_misattributed": "",
         "verbatim_not_found": "",
         "router_source": "lexical",
+        "router_llm_error": "",
         "router_llm_tokens": 0,
         "router_llm_cost": 0.0,
     }

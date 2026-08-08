@@ -125,6 +125,12 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res) -> dict:
         "route_attesa": item.route_attesa or "",
         "route_ok": route_ok,
         "router_source": getattr(res, "router_source", "lexical"),
+        # Una classificazione fallita (429, timeout, proposta non conforme) NON è un
+        # instradamento sbagliato: è un dato mancante che si traveste da decisione, perché
+        # il fallback serve comunque una route. Misurato sulla run `eval-20260808T122852Z`:
+        # 4 fallimenti su 55 hanno depresso il richiamo del router sotto quello lessicale, e
+        # la cosa si è vista solo scavando nell'audit. Qui la colonna la porta in superficie.
+        "router_llm_error": (router_llm.get("error") or ""),
         "router_llm_tokens": router_usage.get("prompt_tokens", 0) + router_usage.get("completion_tokens", 0),
         "router_llm_cost": round(_cost(cfg, router_usage), 6),
         "expected_value": item.expected_value if item.expected_value is not None else "",
@@ -284,6 +290,7 @@ def _aggregate(cfg: RagConfig, rows: list[dict], condition: str) -> dict:
         # di generazione, così l'A/B lessicale vs +LLM si legge dal report senza scavare.
         "router_llm_calls": sum(1 for r in sub if r["router_llm_tokens"] > 0),
         "router_llm_decisions": sum(1 for r in sub if r["router_source"] == "llm"),
+        "router_llm_failed": sum(1 for r in sub if r["router_llm_error"]),
         "router_llm_tokens": sum(r["router_llm_tokens"] for r in sub),
         "router_llm_cost": round(sum(r["router_llm_cost"] for r in sub), 6),
     }
@@ -407,6 +414,8 @@ def _markdown(
         f"| Risposte meta (scheda del corpus) | {agg_off['n_meta']} | {agg_on['n_meta']} |",
         f"| Router agentico: chiamate / decisioni servite | {agg_off['router_llm_calls']} / "
         f"{agg_off['router_llm_decisions']} | {agg_on['router_llm_calls']} / {agg_on['router_llm_decisions']} |",
+        f"| **Router agentico: classificazioni fallite** | {agg_off['router_llm_failed']} "
+        f"| {agg_on['router_llm_failed']} |",
         f"| Router agentico: token / costo | {agg_off['router_llm_tokens']} / {agg_off['router_llm_cost']:.6f} "
         f"| {agg_on['router_llm_tokens']} / {agg_on['router_llm_cost']:.6f} |",
         f"| Quota media di verbatim validi | {pct(agg_off['verbatim_valid_ratio'])} "
@@ -417,6 +426,11 @@ def _markdown(
         "> Il costo del router agentico è **separato** dalla colonna `Costo stimato` (che resta",
         "> costo di generazione): sommarli è legittimo, confonderli no — sul ramo strutturato",
         "> «usage vuoto per costruzione» resta vero anche col classificatore acceso.",
+        ">",
+        "> **`classificazioni fallite` > 0 contamina il richiamo del router.** Una chiamata morta",
+        "> (429, timeout, proposta non conforme) ricade sul lessicale e serve comunque una route:",
+        "> non è un instradamento sbagliato, è un dato mancante travestito da decisione. Con un",
+        "> valore diverso da zero le due righe qui sopra vanno lette come limite inferiore.",
     ]
 
     drift = max(agg_off["suspend_drift_s"], agg_on["suspend_drift_s"])

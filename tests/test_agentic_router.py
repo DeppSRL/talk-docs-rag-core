@@ -36,7 +36,14 @@ class _ClientFinto:
         self._payload = payload
         self._errore = errore
         self.chiamate = 0
+        self.opzioni: dict = {}
         self.chat = type("Chat", (), {"completions": self})()
+
+    def with_options(self, **kwargs):
+        """Come il client OpenAI: ritorna una vista con altre opzioni. Qui la stessa
+        istanza, annotata — così il test può verificare il budget di retry richiesto."""
+        self.opzioni.update(kwargs)
+        return self
 
     def create(self, **kwargs):
         self.chiamate += 1
@@ -101,6 +108,17 @@ def test_errore_di_rete_non_fa_fallire_la_risposta():
     r = agentic.classify("domanda", _lessicale())
     assert r.route == router.POINTWISE and r.source == "lexical"
     assert "chiamata fallita" in r.llm["error"]
+
+
+def test_il_router_ha_un_budget_di_retry_proprio():
+    """Misurato su `eval-20260808T122852Z`: 4 chiamate su 55 morte in 429, ricadute sul
+    lessicale, con il richiamo del router che finiva per misurare la rete. Il ramo
+    agentico raddoppia le richieste al provider: il suo budget di retry non è quello
+    della generazione."""
+    cfg = RagConfig()
+    _, client = _router({"route": "pointwise"})
+    assert client.opzioni["max_retries"] == cfg.router_llm_max_retries
+    assert cfg.router_llm_max_retries > cfg.http_max_retries
 
 
 def test_la_chiamata_e_riproducibile_e_cache_friendly():

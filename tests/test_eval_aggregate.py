@@ -39,6 +39,7 @@ def _riga(condition="off", **kw):
         "verbatim_misattributed": "",
         "verbatim_not_found": "",
         "router_source": "lexical",
+        "router_llm_error": "",
         "router_llm_tokens": 0,
         "router_llm_cost": 0.0,
     }
@@ -104,3 +105,17 @@ def test_accuratezza_rifiuto_ignora_le_borderline():
 def test_condizione_filtra_le_righe():
     rows = [_riga("off"), _riga("on"), _riga("on")]
     assert _aggregate(RagConfig(), rows, "on")["n"] == 2
+
+
+def test_le_classificazioni_fallite_del_router_sono_contate():
+    """Una chiamata di routing morta ricade sul lessicale e serve comunque una route: non
+    è un instradamento sbagliato, è un dato mancante travestito da decisione. Sulla run
+    `eval-20260808T122852Z` quattro fallimenti su 55 hanno depresso il richiamo del router
+    sotto quello lessicale, e la cosa si vedeva solo scavando nell'audit."""
+    rows = [
+        _riga(router_source="llm", router_llm_tokens=1500, router_llm_cost=0.0003),
+        _riga(router_source="lexical", router_llm_tokens=0, router_llm_error="chiamata fallita: RateLimitError"),
+    ]
+    agg = _aggregate(RagConfig(), rows, "off")
+    assert agg["router_llm_failed"] == 1
+    assert agg["router_llm_decisions"] == 1
