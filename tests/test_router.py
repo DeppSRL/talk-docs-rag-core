@@ -176,7 +176,8 @@ def test_i_segnali_grezzi_finiscono_nel_risultato():
     """
     r = router.classify("Quanti dipendenti ha ANAS?")
     assert r.signals == {"forma_conteggio": True, "forma_massa": False, "oggetto_coperto": False,
-                         "delibera_specifica": False, "anni_multipli": False}
+                         "delibera_specifica": False, "anni_multipli": False,
+                         "forma_meta": False, "oggetto_corpus": False}
 
 
 @pytest.mark.xfail(

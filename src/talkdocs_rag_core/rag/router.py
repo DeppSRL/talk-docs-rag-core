@@ -42,6 +42,11 @@ from structured import intents
 STRUCTURED = "structured"
 UNCOVERED = "uncovered"
 POINTWISE = "pointwise"
+META = "meta"
+
+# Tutte le route esprimibili: è l'insieme chiuso contro cui il router agentico valida la
+# proposta del modello (rag/agentic_router.py).
+ROUTES = (STRUCTURED, UNCOVERED, POINTWISE, META)
 
 # Riferimento a un atto specifico: «delibera 47», «delibera n. 75/2021». Vince su tutto.
 _DELIBERA_SPECIFICA = re.compile(r"deliber\w*\s+(?:n\.?\s*)?\d+", re.IGNORECASE)
@@ -64,6 +69,22 @@ _ANNO = re.compile(r"\b(19[6-9]\d|20[0-9]\d)\b")
 _RANGE = re.compile(r"\b(?:dal|da)\s+(\d{4})\s+(?:al|a)\s+(\d{4})\b", re.IGNORECASE)
 _CIPESS = re.compile(r"\bcipess\b", re.IGNORECASE)
 _CIPE = re.compile(r"\bcipe\b", re.IGNORECASE)
+# Meta-domanda: chiede della COLLEZIONE, non di un contenuto. Due segnali entrambi necessari
+# — la forma interrogativa meta e il riferimento esplicito alla collezione — perché la
+# risposta (la scheda del corpus) è giusta solo se la domanda è davvero sull'archivio:
+# «di cosa parlano le delibere del 2020?» è una domanda tematica (famiglia A, scoperta),
+# non una meta-domanda, e deve restare POINTWISE.
+_FORMA_META = re.compile(
+    r"\b(di\s+cosa\s+(?:parla|tratta)|che\s+cos'?[èe]|cosa\s+(?:contiene|c'?[èe])"
+    r"|(?:che|quali|quant[ei])\s+(?:tipo\s+di\s+)?document\w+|che\s+periodo|quale\s+periodo"
+    r"|cosa\s+(?:posso|si\s+può)\s+chieder\w*|cosa\s+puoi\s+(?:fare|dirmi)"
+    r"|come\s+sono\s+fatt\w+)\b",
+    re.IGNORECASE,
+)
+_OGGETTO_CORPUS = re.compile(
+    r"\b(corpus|archivio|raccolta|banca\s+dati|dataset|quest[oi]\s+document\w+)\b",
+    re.IGNORECASE,
+)
 
 # Motivo del rifiuto per il caso multi-anno. Il rifiuto deve dire *quale* motivo: il testo di
 # default parla dell'assenza della tabella degli importi, che qui sarebbe falso. Copre entrambe
@@ -90,6 +111,13 @@ class Route:
     # Motivo del rifiuto quando ``route == UNCOVERED``; ``None`` = il motivo di default
     # (nessuna tabella degli importi). Gli altri rami non lo valorizzano.
     reason: str | None = None
+    # Chi ha deciso la route servita: "lexical" (questo modulo) o "llm" (il router
+    # agentico, quando abilitato e quando la sua proposta supera la validazione).
+    source: str = "lexical"
+    # Traccia della classificazione LLM: proposta grezza, usage, eventuale errore.
+    # Registrata anche quando il fallback la annulla — come `abstention_signal`, i
+    # segnali si registrano sempre, le decisioni si ritarano su run passate.
+    llm: dict | None = None
 
 
 def _anni(query: str) -> tuple[list[int], tuple[int, int] | None]:
@@ -136,17 +164,28 @@ def classify(query: str) -> Route:
     # estremi, quell'anno non entra in nessun filtro esprimibile e il conteggio uscirebbe
     # monco — cioè calcolato, credibile e sbagliato, come i due anni sciolti.
     anni_multipli = bool(set(anni) - set(intervallo)) if intervallo is not None else len(anni) > 1
+    forma_meta = bool(_FORMA_META.search(query))
+    oggetto_corpus = bool(_OGGETTO_CORPUS.search(query))
     signals = {
         "forma_conteggio": conteggio,
         "forma_massa": massa,
         "oggetto_coperto": oggetto,
         "delibera_specifica": specifica,
         "anni_multipli": anni_multipli,
+        "forma_meta": forma_meta,
+        "oggetto_corpus": oggetto_corpus,
     }
 
     # 1. Un atto nominato per numero è una domanda puntuale, qualunque forma abbia.
     if specifica:
         return Route(POINTWISE, signals=signals)
+    # 1b. Meta-domanda sulla collezione: la risposta è la scheda del corpus più le
+    #     statistiche calcolate, non un contenuto. Prima delle forme di conteggio: «quanti
+    #     documenti contiene il corpus» è una domanda sulla collezione, e un fall-through
+    #     su UNCOVERED risponderebbe «non ho la tabella degli importi» a chi ha chiesto
+    #     che cos'è l'archivio.
+    if forma_meta and oggetto_corpus:
+        return Route(META, signals=signals)
     # 2. Conteggio o elenco sugli atti del Comitato: è ciò che il manifest sa fare — ma solo se
     #    il filtro anno è esprimibile. Più anni sciolti non lo sono: rifiuto, non conteggio
     #    globale col filtro amputato via.

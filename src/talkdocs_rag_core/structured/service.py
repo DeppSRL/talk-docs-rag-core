@@ -11,12 +11,23 @@ import logging
 
 from config import RagConfig
 from rag import router
+from rag.corpus_card import CorpusCard
 from rag.generation import RagResult
+from rag.outcomes import StructuredOutcome
 from structured import intents
 from structured.answer import componi
 from structured.store import StructuredStore
 
 logger = logging.getLogger(__name__)
+
+# Statistiche del perimetro indicizzato per la risposta meta. La scheda del corpus non
+# porta numeri per regola (divergerebbero dal corpus alla prima run di ingest): li porta
+# questa query, che in audit è la citazione — come per ogni risposta calcolata.
+_SQL_STATS = (
+    "SELECT comitato, COUNT(*) AS n, MIN(anno) AS anno_min, MAX(anno) AS anno_max "
+    "FROM documenti WHERE is_delibera GROUP BY comitato ORDER BY comitato"
+)
+_INTENT_CORPUS_STATS = "corpus_stats"
 
 _MOTIVO_UNCOVERED = "aggregazione fuori copertura: nessuna tabella degli importi"
 
@@ -103,6 +114,65 @@ def serve_uncovered(cfg: RagConfig, query: str, rotta: router.Route) -> RagResul
         refused=True,
         refusal_reason=motivo,
         route=route_servita,
+        **_base(cfg, query, rotta, route_servita),
+    )
+
+
+def serve_meta(
+    cfg: RagConfig,
+    store: StructuredStore | None,
+    card: CorpusCard | None,
+    query: str,
+    rotta: router.Route,
+) -> RagResult:
+    """Meta-domanda sulla collezione: scheda scritta a mano + perimetro calcolato.
+
+    Template, mai il modello — come ogni risposta di questo file. Il chiamante garantisce
+    che almeno uno fra ``store`` e ``card`` esista: con entrambi assenti la route degrada
+    a POINTWISE in pipeline, non arriva qui.
+    """
+    blocchi: list[str] = []
+    if card is not None:
+        blocchi.append(card.text)
+    else:
+        # Senza scheda restano i soli numeri: si dice cosa manca invece di improvvisare
+        # un contesto che nessuno ha scritto.
+        blocchi.append(
+            "Per questo corpus non è stata compilata una scheda descrittiva: posso "
+            "dichiararne solo il perimetro indicizzato."
+        )
+
+    esito = None
+    if store is not None:
+        rows = store.query(_SQL_STATS, [])
+        totale = sum(int(r["n"]) for r in rows)
+        righe = [
+            f"- {r['comitato']}: {r['n']} delibere, anni {r['anno_min']}–{r['anno_max']}" for r in rows
+        ]
+        blocchi.append(
+            "**Perimetro indicizzato** — "
+            f"{totale} delibere interrogabili, così distribuite:\n" + "\n".join(righe) + "\n\n"
+            "Questi numeri sono calcolati sui metadati del corpus indicizzato, non "
+            "dichiarati nella scheda: l'archivio storico completo è più ampio."
+        )
+        esito = StructuredOutcome(
+            intent=_INTENT_CORPUS_STATS,
+            sql=_SQL_STATS,
+            params=[],
+            rows=rows,
+            n_rows=len(rows),
+            computed_value=totale,
+            completeness={},
+            cited_doc_ids=[],
+        )
+
+    route_servita = router.META
+    return RagResult(
+        answer_text="\n\n".join(blocchi),
+        refused=False,
+        refusal_reason=None,
+        route=route_servita,
+        structured=esito,
         **_base(cfg, query, rotta, route_servita),
     )
 

@@ -38,8 +38,9 @@ class EvalItem:
     category: str
     expect_refuse: bool | None
     question: str
-    # Via attesa: "structured" | "refuse" | "pointwise". Campo, non categoria nuova: le
-    # categorie sono già cinque e moltiplicarle le renderebbe illeggibili.
+    # Via attesa: "structured" | "refuse" | "pointwise" | "meta". Campo, non categoria
+    # nuova — con l'eccezione dichiarata di `meta`, che È una categoria (incremento 1b):
+    # una domanda sulla collezione non è una variante di nessuna delle cinque esistenti.
     route_attesa: str | None = None
     # Verità numerica per le risposte calcolate. Confronto esatto: a un COUNT non si
     # concede tolleranza.
@@ -84,9 +85,15 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res) -> dict:
     answered = not declined
     route = getattr(res, "route", "pointwise")
     strutturata = route == "structured"
-    # La fonte di una risposta calcolata è la query eseguita, non un chunk_id: senza questo
-    # ramo la metrica segnerebbe «senza fonte» una risposta perfetta.
-    source_ok = answered and (strutturata or len(res.cited_chunk_ids) > 0)
+    # La fonte di una risposta calcolata è la query eseguita, non un chunk_id; quella di
+    # una risposta meta è la scheda del corpus (più la query delle statistiche). Senza
+    # questi rami la metrica segnerebbe «senza fonte» una risposta perfetta.
+    source_ok = answered and (strutturata or route == "meta" or len(res.cited_chunk_ids) > 0)
+    # Il costo del router agentico è un costo, ma un ALTRO costo: colonne sue, mai
+    # sommate a `usage` — sul ramo strutturato «usage vuoto per costruzione» deve restare
+    # vero anche con il classificatore acceso.
+    router_llm = getattr(res, "router_llm", None) or {}
+    router_usage = router_llm.get("usage") or {}
 
     valore = res.structured.computed_value if (strutturata and res.structured) else None
     if item.expected_value is None or valore is None:
@@ -117,6 +124,9 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res) -> dict:
         "route": route,
         "route_attesa": item.route_attesa or "",
         "route_ok": route_ok,
+        "router_source": getattr(res, "router_source", "lexical"),
+        "router_llm_tokens": router_usage.get("prompt_tokens", 0) + router_usage.get("completion_tokens", 0),
+        "router_llm_cost": round(_cost(cfg, router_usage), 6),
         "expected_value": item.expected_value if item.expected_value is not None else "",
         "computed_value": valore if valore is not None else "",
         "value_ok": value_ok,
@@ -140,11 +150,18 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res) -> dict:
 
 def _verdict(res) -> str:
     """Etichetta compatta dell'esito, per la riga di progresso."""
+    # Il marcatore di sorgente compare solo quando il router agentico ha deciso: sulla
+    # riga di progresso l'assenza è il default lessicale, non un'informazione persa.
+    llm_tag = "  ·router-llm" if getattr(res, "router_source", "lexical") == "llm" else ""
+    if getattr(res, "route", "pointwise") == "meta":
+        s = getattr(res, "structured", None)
+        stats = f"scheda + {s.computed_value} delibere" if s is not None else "scheda, senza statistiche"
+        return f"META ({stats})  [0 chiamate di risposta]{llm_tag}"
     if getattr(res, "route", "pointwise") == "structured" and res.structured is not None:
         s = res.structured
-        return f"CALCOLATA ({s.intent}) → {s.computed_value}  righe={s.n_rows}  [0 chiamate]"
+        return f"CALCOLATA ({s.intent}) → {s.computed_value}  righe={s.n_rows}  [0 chiamate]{llm_tag}"
     if getattr(res, "route", "pointwise") == "uncovered":
-        return "RIFIUTO DICHIARATO (aggregazione fuori copertura)"
+        return f"RIFIUTO DICHIARATO (aggregazione fuori copertura){llm_tag}"
     if res.from_cache and res.cache_kind == "semantic":
         sim = res.extra.get("cache_similarity")
         return f"HIT-semantica{f' (sim {sim:.3f})' if sim is not None else ''}"
@@ -262,6 +279,13 @@ def _aggregate(cfg: RagConfig, rows: list[dict], condition: str) -> dict:
         "verbatim_not_found": sum(int(r["verbatim_not_found"] or 0) for r in sub),
         "n_structured": sum(1 for r in sub if r["route"] == "structured"),
         "n_uncovered": sum(1 for r in sub if r["route"] == "uncovered"),
+        "n_meta": sum(1 for r in sub if r["route"] == "meta"),
+        # Router agentico: chiamate, decisioni servite, token e costo — separati dal costo
+        # di generazione, così l'A/B lessicale vs +LLM si legge dal report senza scavare.
+        "router_llm_calls": sum(1 for r in sub if r["router_llm_tokens"] > 0),
+        "router_llm_decisions": sum(1 for r in sub if r["router_source"] == "llm"),
+        "router_llm_tokens": sum(r["router_llm_tokens"] for r in sub),
+        "router_llm_cost": round(sum(r["router_llm_cost"] for r in sub), 6),
     }
 
 
@@ -280,6 +304,7 @@ def _per_categoria(rows: list[dict], condition: str) -> list[str]:
         "near_miss": "rifiuto/astensione",
         "aggregazione": "risposta *calcolata* sul manifest o rifiuto dichiarato",
         "out_of_corpus": "rifiuto",
+        "meta": "risposta dalla scheda del corpus + statistiche calcolate",
         "borderline": "(categoria legacy, ambigua)",
     }
     for c in cats:
@@ -379,10 +404,19 @@ def _markdown(
         f"| {pct(agg_on['structured_value_accuracy'])} |",
         f"| Risposte calcolate / rifiuti dichiarati | {agg_off['n_structured']} / {agg_off['n_uncovered']} "
         f"| {agg_on['n_structured']} / {agg_on['n_uncovered']} |",
+        f"| Risposte meta (scheda del corpus) | {agg_off['n_meta']} | {agg_on['n_meta']} |",
+        f"| Router agentico: chiamate / decisioni servite | {agg_off['router_llm_calls']} / "
+        f"{agg_off['router_llm_decisions']} | {agg_on['router_llm_calls']} / {agg_on['router_llm_decisions']} |",
+        f"| Router agentico: token / costo | {agg_off['router_llm_tokens']} / {agg_off['router_llm_cost']:.6f} "
+        f"| {agg_on['router_llm_tokens']} / {agg_on['router_llm_cost']:.6f} |",
         f"| Quota media di verbatim validi | {pct(agg_off['verbatim_valid_ratio'])} "
         f"| {pct(agg_on['verbatim_valid_ratio'])} |",
         f"| Span misattribuiti / non trovati | {agg_off['verbatim_misattributed']} / "
         f"{agg_off['verbatim_not_found']} | {agg_on['verbatim_misattributed']} / {agg_on['verbatim_not_found']} |",
+        "",
+        "> Il costo del router agentico è **separato** dalla colonna `Costo stimato` (che resta",
+        "> costo di generazione): sommarli è legittimo, confonderli no — sul ramo strutturato",
+        "> «usage vuoto per costruzione» resta vero anche col classificatore acceso.",
     ]
 
     drift = max(agg_off["suspend_drift_s"], agg_on["suspend_drift_s"])

@@ -66,6 +66,11 @@ class AuditRecord:
     # run passate senza rigiocarle, com'è già per `abstention_signal`.
     route: str = "pointwise"
     router_signals: dict = field(default_factory=dict)
+    # Router agentico (incremento 1b): chi ha deciso la route e la traccia della
+    # chiamata di classificazione (proposta grezza, usage, errore, latenza). La traccia
+    # c'è anche quando il fallback l'ha annullata: una proposta scartata è un dato.
+    router_source: str = "lexical"
+    router_llm: dict | None = None
     # Sul ramo aggregativo la tupla deve permettere di RIESEGUIRE la query: sql + params +
     # corpus_version. È la citazione, non un dettaglio diagnostico.
     structured: dict | None = None
@@ -130,6 +135,8 @@ class AuditWriter:
             latency_wall_s=result.latency_wall_s,
             route=result.route,
             router_signals=result.router_signals,
+            router_source=result.router_source,
+            router_llm=result.router_llm,
             structured=asdict(result.structured) if result.structured else None,
             verbatim=asdict(result.verbatim) if result.verbatim else None,
             uncertain_reason=result.uncertain_reason,

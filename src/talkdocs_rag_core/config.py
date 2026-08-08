@@ -165,6 +165,20 @@ class RagConfig:
     # Righe mostrate nella risposta aggregativa. L'audit le porta comunque tutte.
     structured_max_rows: int = 20
 
+    # --- Scheda del corpus e router agentico (incremento 1b) ---
+    # Directory della scheda (contesto semantico scritto a mano, file NN-*.md). Assente
+    # o vuota → niente risposta meta dalla scheda, la pipeline degrada senza esplodere.
+    corpus_card_dir: str = "corpus/delibere/card"
+    # Classificatore LLM a valle del router lessicale. NASCE SPENTO, come il guardiano
+    # IDF e la guardia verbatim: introduce varianza nel punto che decide quale pipeline
+    # risponde, quindi prima una run dedicata che lo misuri (lessicale vs +LLM), poi la
+    # decisione. La proposta del modello è comunque validata contro il semantic layer
+    # chiuso: il numero non lo scrive mai il modello.
+    router_llm_enabled: bool = False
+    # Tetto di output della chiamata di classificazione: un JSON di route sta in poche
+    # decine di token, il tetto è una guardia contro derive di prosa.
+    router_llm_max_tokens: int = 256
+
     # --- Pricing (M1: da confermare in console La Plateforme) — EUR/USD per 1M token ---
     price_input_per_mtok: float = 0.0
     price_output_per_mtok: float = 0.0
@@ -216,6 +230,9 @@ class RagConfig:
             verbatim_min_valid_ratio=_get_float("VERBATIM_MIN_VALID_RATIO", cls.verbatim_min_valid_ratio),
             verbatim_min_chars=_get_int("VERBATIM_MIN_CHARS", cls.verbatim_min_chars),
             structured_max_rows=_get_int("STRUCTURED_MAX_ROWS", cls.structured_max_rows),
+            corpus_card_dir=_get("CORPUS_CARD_DIR", cls.corpus_card_dir),
+            router_llm_enabled=_get_bool("ROUTER_LLM_ENABLED", cls.router_llm_enabled),
+            router_llm_max_tokens=_get_int("ROUTER_LLM_MAX_TOKENS", cls.router_llm_max_tokens),
             price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", cls.price_input_per_mtok),
             price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", cls.price_output_per_mtok),
             price_cached_per_mtok=_get_float("PRICE_CACHED_PER_MTOK", cls.price_cached_per_mtok),

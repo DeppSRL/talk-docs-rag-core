@@ -116,10 +116,17 @@ class RagResult:
     latency_wall_s: float | None = None  # wall-clock: se divergono, la macchina ha dormito
     extra: dict = field(default_factory=dict)
     # --- Router e guardia verbatim (incremento 1) ---
-    # "pointwise" | "structured" | "uncovered". Registrato sempre: distingue in audit un
-    # POINTWISE legittimo da un fall-through del router lessicale (spec §7).
+    # "pointwise" | "structured" | "uncovered" | "meta". Registrato sempre: distingue in
+    # audit un POINTWISE legittimo da un fall-through del router lessicale (spec §7).
     route: str = "pointwise"
     router_signals: dict = field(default_factory=dict)
+    # --- Router agentico (incremento 1b) ---
+    # Chi ha deciso la route: "lexical" | "llm". La traccia della classificazione LLM
+    # (proposta, usage, errore) viaggia SEPARATA da `usage`: il ramo strutturato dichiara
+    # «usage vuoto per costruzione» e deve restare vero — il costo del routing è un costo,
+    # ma è un altro costo, e nel report ha colonne sue.
+    router_source: str = "lexical"
+    router_llm: dict | None = None
     structured: StructuredOutcome | None = None
     verbatim: VerbatimOutcome | None = None
     # Motivo dell'astensione: "termini_mancanti" (guardiano IDF) | "verbatim".
@@ -139,11 +146,13 @@ def _build_passages(results: list[HybridSearchResult], top_k: int) -> list[Passa
     return passages
 
 
-def _usage_dict(response) -> dict:
+def usage_dict(response) -> dict:
     """``usage`` normalizzato dalla risposta del provider (``{}`` se il provider non lo espone).
 
-    Estratto in una funzione perché serve in **due** punti d'uscita: la risposta servita e
-    l'astensione da guardia verbatim, che esce dopo aver già speso i token.
+    Estratto in una funzione perché serve in **tre** punti: la risposta servita,
+    l'astensione da guardia verbatim (che esce dopo aver già speso i token) e la
+    chiamata di classificazione del router agentico (``rag/agentic_router.py``) — una
+    sola nozione di «usage», non tre normalizzazioni che possono divergere.
     """
     u = getattr(response, "usage", None)
     if u is None:
@@ -383,7 +392,7 @@ class MistralGenerator:
         cited_chunk_ids = [passages[n - 1].chunk_id for n in valid]
         # L'usage si estrae **qui**, non al momento di costruire la risposta servita: la
         # guardia verbatim può uscire prima, e i token della chiamata sono già stati spesi.
-        usage = _usage_dict(response)
+        usage = usage_dict(response)
 
         # --- Guardia verbatim (C3c): le parole dichiarate esistono dove il modello dice? ---
         # A differenza dell'astensione IDF, questa arriva **dopo** la chiamata: l'astensione

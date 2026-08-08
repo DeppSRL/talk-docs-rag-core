@@ -117,6 +117,73 @@ def test_router_spento_riporta_la_pipeline_a_prima():
     assert res.router_signals == {}
 
 
+def test_il_ramo_meta_non_tocca_la_cache_ne_il_retrieval():
+    """La risposta meta è deterministica e dipende dal corpus_version come quella
+    strutturata: cacharla o farla passare dal retrieval sarebbe lo stesso guasto."""
+    from rag.corpus_card import CorpusCard
+
+    p, cache, hybrid, gen = _pipeline()
+    p.card = CorpusCard(sections=(("00-contesto", "Delibere CIPE/CIPESS, atti pubblici."),))
+    res = asyncio.run(p.ask("Di cosa parla questo corpus?", use_cache=True))
+    assert res.route == "meta" and res.refused is False
+    assert "atti pubblici" in res.answer_text
+    assert "1 delibere" in res.answer_text or "1 delibera" in res.answer_text
+    assert cache.lookups == 0 and cache.stores == 0
+    assert hybrid.searches == 0 and gen.chiamate == 0
+
+
+def test_meta_senza_scheda_ne_store_degrada_a_puntuale(caplog):
+    p, cache, hybrid, gen = _pipeline()
+    p.card = None
+    p.store = None
+    with caplog.at_level(logging.WARNING, logger="app.pipeline"):
+        res = asyncio.run(p.ask("Di cosa parla questo corpus?", use_cache=True))
+    assert res.route == "pointwise"
+    assert hybrid.searches == 1 and gen.chiamate == 1
+    assert any("ramo meta disattivato" in r.getMessage() for r in caplog.records)
+
+
+class AgenticFinto:
+    """Propone sempre la stessa route: basta a verificare il wiring della cascata."""
+
+    def __init__(self, route, intent=None, params=None):
+        self._route, self._intent, self._params = route, intent, params or {}
+        self.consultato = 0
+
+    def classify(self, query, lessicale):
+        from rag import router as r
+
+        self.consultato += 1
+        return r.Route(self._route, intent=self._intent, params=self._params,
+                       signals=lessicale.signals, source="llm",
+                       llm={"proposta": {"route": self._route}, "usage": {"prompt_tokens": 7}, "error": None})
+
+
+def test_il_router_agentico_recupera_la_colloquiale():
+    """`ag-05`: il lessicale non la riconosce, la proposta LLM validata la calcola."""
+    p, cache, hybrid, gen = _pipeline()
+    p.agentic = AgenticFinto("structured", intent="count_delibere", params={"anno": 2024, "comitato": "CIPESS"})
+    res = asyncio.run(p.ask("Nel 2024 il Comitato quante ne ha approvate?", use_cache=True))
+    assert res.route == "structured" and res.structured.computed_value == 1
+    assert res.router_source == "llm" and res.router_llm["usage"] == {"prompt_tokens": 7}
+    assert gen.chiamate == 0
+
+
+def test_la_delibera_specifica_non_consulta_il_router_agentico():
+    """Guardia dura: la regola deterministica vince, e la chiamata non si paga."""
+    p, cache, hybrid, gen = _pipeline()
+    p.agentic = AgenticFinto("uncovered")
+    res = asyncio.run(p.ask("Che cosa prevede la delibera 75/2021?", use_cache=True))
+    assert res.route == "pointwise" and p.agentic.consultato == 0
+    assert res.router_source == "lexical" and res.router_llm is None
+
+
+def test_router_agentico_spento_per_default():
+    """`router_llm_enabled = False` → `build_pipeline` non costruisce il classificatore:
+    qui basta l'invariante sul default della config, il wiring è coperto sopra."""
+    assert RagConfig().router_llm_enabled is False
+
+
 def test_senza_store_il_router_non_instrada(caplog):
     """Nessun manifest = nessuna tabella: si torna alla pipeline di sempre invece di esplodere."""
     p, cache, hybrid, gen = _pipeline()

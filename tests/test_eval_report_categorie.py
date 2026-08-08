@@ -43,6 +43,9 @@ def _riga(category, condition="off", **kw):
         "verbatim_valid_ratio": "",
         "verbatim_misattributed": "",
         "verbatim_not_found": "",
+        "router_source": "lexical",
+        "router_llm_tokens": 0,
+        "router_llm_cost": 0.0,
     }
     base.update(kw)
     return base
