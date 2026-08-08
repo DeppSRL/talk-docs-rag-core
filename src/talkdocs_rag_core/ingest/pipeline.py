@@ -44,11 +44,31 @@ class IngestReport:
     manifest_path: str
 
 
-def _discover_files(corpus_dir: Path) -> list[Path]:
+def _discover_files(corpus_dir: Path, card_dir: Path | None = None) -> list[Path]:
+    """File del corpus, **esclusa la scheda**.
+
+    La scheda vive dentro `corpus/` per stare accanto ai documenti che descrive, e i suoi
+    file sono `.md`: senza questa esclusione l'ingest la indicizza come se fosse una
+    fonte. Misurato il 2026-08-08: tre documenti in più nell'indice
+    (`delibere/card/*.md`) in tutte le run dell'8 agosto.
+
+    Non è un problema di conteggi — lo `StructuredStore` filtra su `is_delibera` e la
+    scheda non ha un codice delibera — ma di **natura di ciò che si può citare**: la
+    scheda è testo nostro, che descrive che cosa il sistema sa fare. Recuperata come
+    passaggio diventerebbe una fonte citabile, e una risposta potrebbe sostenere
+    un'affermazione sul corpus citando ciò che abbiamo scritto noi sul corpus. Su un
+    prodotto di accountability è il genere di circolarità che squalifica una citazione.
+    """
+    escluse = []
+    if card_dir is not None and card_dir.is_dir():
+        escluse.append(card_dir.resolve())
     files = [
         p
         for p in sorted(corpus_dir.rglob("*"))
-        if p.is_file() and p.suffix.lower() in SUPPORTED_SUFFIXES and p.name != "README.md"
+        if p.is_file()
+        and p.suffix.lower() in SUPPORTED_SUFFIXES
+        and p.name != "README.md"
+        and not any(d in p.resolve().parents for d in escluse)
     ]
     return files
 
@@ -70,7 +90,10 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
     )
 
     corpus_dir = corpus_dir or (REPO_ROOT / "corpus")
-    files = _discover_files(corpus_dir)
+    card_dir = Path(cfg.corpus_card_dir)
+    if not card_dir.is_absolute():
+        card_dir = REPO_ROOT / card_dir
+    files = _discover_files(corpus_dir, card_dir)
     if not files:
         raise SystemExit(
             f"Nessun file supportato in {corpus_dir} ({sorted(SUPPORTED_SUFFIXES)}). "
