@@ -169,12 +169,17 @@ class RagConfig:
     # Directory della scheda (contesto semantico scritto a mano, file NN-*.md). Assente
     # o vuota → niente risposta meta dalla scheda, la pipeline degrada senza esplodere.
     corpus_card_dir: str = "corpus/delibere/card"
-    # Classificatore LLM a valle del router lessicale. NASCE SPENTO, come il guardiano
-    # IDF e la guardia verbatim: introduce varianza nel punto che decide quale pipeline
-    # risponde, quindi prima una run dedicata che lo misuri (lessicale vs +LLM), poi la
-    # decisione. La proposta del modello è comunque validata contro il semantic layer
-    # chiuso: il numero non lo scrive mai il modello.
-    router_llm_enabled: bool = False
+    # Classificatore LLM a valle del router lessicale. **ACCESO** dal 2026-08-08, dopo
+    # tre misure e non per intuizione: nasceva spento, la prima run lo bocciava (quattro
+    # risposte perse), la correzione della scheda lo ha risanato, e la validazione su 16
+    # domande **mai usate per correggere** ha confermato che il guadagno generalizza —
+    # routing 13/16 contro 10/16, e aggregative colloquiali 4/4 contro 0/4, che è la
+    # classe che le regex non possono prendere. Due difetti residui dichiarati in
+    # STATUS.md: la classe «importo scritto in un documento» è instradata bene 3 volte su
+    # 5, e la route meta attira 1 domanda sull'ente su 2.
+    # La proposta del modello resta validata contro il semantic layer chiuso, e su
+    # qualunque violazione si ricade sul lessicale: il numero non lo scrive mai il modello.
+    router_llm_enabled: bool = True
     # Tetto di output della chiamata di classificazione: un JSON di route sta in poche
     # decine di token, il tetto è una guardia contro derive di prosa.
     router_llm_max_tokens: int = 256

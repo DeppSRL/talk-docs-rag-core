@@ -178,10 +178,11 @@ def test_la_delibera_specifica_non_consulta_il_router_agentico():
     assert res.router_source == "lexical" and res.router_llm is None
 
 
-def test_router_agentico_spento_per_default():
-    """`router_llm_enabled = False` → `build_pipeline` non costruisce il classificatore:
-    qui basta l'invariante sul default della config, il wiring è coperto sopra."""
-    assert RagConfig().router_llm_enabled is False
+def test_router_agentico_acceso_per_default():
+    """Acceso dal 2026-08-08, dopo la validazione su domande mai usate per correggere
+    (routing 13/16 contro 10/16). Il test fissa la decisione: chi lo spegne lo fa
+    esplicitamente, non per una svista in `RagConfig`."""
+    assert RagConfig().router_llm_enabled is True
 
 
 def test_senza_store_il_router_non_instrada(caplog):
