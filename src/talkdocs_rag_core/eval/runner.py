@@ -278,7 +278,7 @@ def _per_categoria(rows: list[dict], condition: str) -> list[str]:
         "in_corpus": "risposta",
         "vaga": "astensione (o risposta cauta)",
         "near_miss": "rifiuto/astensione",
-        "aggregazione": "rifiuto/astensione — non calcolabile su k chunk",
+        "aggregazione": "risposta *calcolata* sul manifest o rifiuto dichiarato",
         "out_of_corpus": "rifiuto",
         "borderline": "(categoria legacy, ambigua)",
     }
@@ -304,7 +304,9 @@ def _markdown(
         "",
         f"- **Modello:** `{cfg.mistral_model}`  ·  **embedding:** `{cfg.mistral_embed_model}` (dim {cfg.embed_dim})",
         f"- **corpus_version:** `{corpus_version}`",
-        f"- **eval set:** {n_items} domande (in_corpus / borderline / out_of_corpus)",
+        # Derivata dai dati, non cablata: la lista cablata era ferma a `borderline` da due
+        # giorni dopo che la tassonomia si era spaccata in near_miss/aggregazione + vaga.
+        f"- **eval set:** {n_items} domande ({' / '.join(sorted({r['category'] for r in rows}))})",
         f"- **parametri:** chunk={cfg.chunk_tokens}/{cfg.chunk_overlap_ratio}, "
         f"top_k={cfg.rag_top_k}, pesi v/k={cfg.hybrid_vector_weight}/{cfg.hybrid_keyword_weight}, "
         f"support_thr={cfg.support_threshold}, cache_sim_thr={cfg.cache_sim_threshold}",
