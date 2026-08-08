@@ -118,3 +118,13 @@ def test_bundle_roundtrip(tmp_path):
     assert judge.carica_bundle("r1", "off", tmp_path)["run_id"] == "r1"
     trovati = judge.bundle_disponibili(tmp_path)
     assert trovati == [{"run_id": "r1", "condition": "off", "path": str(path)}]
+
+
+def test_le_run_di_singole_ask_non_finiscono_nel_menu(tmp_path):
+    """In `logs/` si accumulano decine di `run-*` (una `ask` da CLI o dalla console) e
+    `web-session`. Giudicarle non produce un tasso di fedeltà — il denominatore è l'eval
+    set — e in un menu a tendina seppelliscono le run che si vogliono davvero giudicare."""
+    for nome in ("eval-20260808T152700Z", "eval-20260807T181416Z", "run-20260807T162233Z", "web-session"):
+        (tmp_path / f"{nome}.jsonl").write_text("{}\n", encoding="utf-8")
+    assert judge.run_disponibili(tmp_path) == ["eval-20260808T152700Z", "eval-20260807T181416Z"]
+    assert len(judge.run_disponibili(tmp_path, solo_eval=False)) == 4

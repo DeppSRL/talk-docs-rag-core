@@ -214,11 +214,21 @@ def stato_modulo(path: Path, form_iniziale: list[dict]) -> dict[str, dict]:
     return {_chiave(r): {c: r.get(c, "") for c in COLONNE_GIUDIZIO} for r in righe}
 
 
-def run_disponibili(audit_dir: str | Path) -> list[str]:
+def run_disponibili(audit_dir: str | Path, solo_eval: bool = True) -> list[str]:
+    """Run di audit presenti in locale, più recenti prima.
+
+    `solo_eval` esclude `run-*` e `web-session`: sono singole `ask` da CLI o dalla
+    console, e giudicarle non produce un tasso di fedeltà — il denominatore è l'eval set.
+    In `logs/` se ne accumulano decine, e in un menu a tendina seppelliscono le due o tre
+    run che si vogliono davvero giudicare.
+    """
     d = Path(audit_dir)
     if not d.is_dir():
         return []
-    return sorted((p.stem for p in d.glob("*.jsonl")), reverse=True)
+    nomi = (p.stem for p in d.glob("*.jsonl"))
+    if solo_eval:
+        nomi = (n for n in nomi if n.startswith("eval-"))
+    return sorted(nomi, reverse=True)
 
 
 def bundle_disponibili(out_dir: str | Path = REPORTS) -> list[dict]:
