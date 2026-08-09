@@ -8,6 +8,7 @@ che non si può sbagliare due volte: **un giudizio già dato non si perde**.
 
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -253,3 +254,80 @@ def test_toccare_un_giudizio_ereditato_lo_rende_proprio(tmp_path):
     judge.salva_giudizio(p, form, "ic-01", {"fedele": "NO"})
     riga = judge.leggi_modulo(p)[0]
     assert riga["fedele"] == "NO" and riga["ereditato_da"] == ""
+
+
+# --- L'ereditarietà nella pagina, eseguita davvero -----------------------------------
+# Il resto dei controlli sulla UI legge il sorgente; questo no. La fusione dei giudizi ha
+# una precedenza a tre livelli (eredità < browser < repository) e una regola non ovvia —
+# si sovrascrive solo dove c'è qualcosa — che un controllo testuale non verifica. Il
+# difetto che chiude era esattamente di quel tipo: la pagina leggeva le ultime due
+# sorgenti e ignorava l'eredità, così alla prima apertura di una run nuova mostrava 33
+# item da giudicare mentre 21 erano già stati dati su risposte identiche.
+def _estrai_js() -> str:
+    sorgente = (Path(__file__).resolve().parent.parent / "web" / "public" / "index.html").read_text(encoding="utf-8")
+    pezzi = []
+    for nome in ("COLONNE", "COLONNE_GIUDIZIO"):
+        m = re.search(rf"^const {nome} = \[.*?\];$", sorgente, re.MULTILINE | re.DOTALL)
+        assert m, f"dichiarazione di {nome} non trovata nella pagina"
+        pezzi.append(m.group(0))
+    m = re.search(r"^function unisciGiudizi\(.*?^\}$", sorgente, re.MULTILINE | re.DOTALL)
+    assert m, "unisciGiudizi non trovata: la pagina non fonde più i giudizi ereditati"
+    pezzi.append(m.group(0))
+    return "\n".join(pezzi)
+
+
+def _unisci(bundle, locali, remoti, tmp_path):
+    import subprocess
+
+    if shutil.which("node") is None:
+        pytest.skip("node non disponibile")
+    script = tmp_path / "prova.mjs"
+    script.write_text(
+        _estrai_js()
+        + "\nconst [b, l, r] = JSON.parse(process.argv[2]);"
+        + "\nconsole.log(JSON.stringify(unisciGiudizi(b, l, r)));\n",
+        encoding="utf-8",
+    )
+    out = subprocess.run(
+        ["node", str(script), json.dumps([bundle, locali, remoti])],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(out.stdout)
+
+
+def _riga(ident, **kw):
+    base = {c: "" for c in COLONNE_FORM}
+    base.update({"id": ident, "domanda": f"domanda {ident}"})
+    base.update(kw)
+    return base
+
+
+def test_i_giudizi_ereditati_del_bundle_si_vedono_alla_prima_apertura(tmp_path):
+    bundle = {"form": [
+        _riga("ic-01", fedele="SI", italiano_1_5="5", ereditato_da="eval-precedente"),
+        _riga("meta-01"),  # da leggere: risposta nuova
+    ]}
+    g = _unisci(bundle, {}, {}, tmp_path)
+    assert g["ic-01"]["fedele"] == "SI" and g["ic-01"]["ereditato_da"] == "eval-precedente"
+    assert "meta-01" not in g  # niente giudizio finto su una risposta mai letta
+
+
+def test_il_repository_vince_sull_eredita_ma_solo_dove_ha_qualcosa(tmp_path):
+    bundle = {"form": [_riga("ic-01", fedele="SI", ereditato_da="eval-precedente"), _riga("ic-02")]}
+    # Il CSV committato porta ANCHE le righe vuote: prenderle alla lettera cancellerebbe
+    # l'eredità, che è il difetto per cui questa funzione esiste.
+    remoti = {"ic-01": {"fedele": "NO", "causa": "retrieval", "ereditato_da": ""},
+              "ic-02": {"fedele": "", "causa": "", "ereditato_da": ""}}
+    g = _unisci(bundle, {}, remoti, tmp_path)
+    assert g["ic-01"]["fedele"] == "NO"      # riletto a mano: vince
+    assert g["ic-01"]["ereditato_da"] == ""  # e non si conta più come ereditato
+    assert "ic-02" not in g or not g["ic-02"]["fedele"]
+
+
+def test_cancellare_un_giudizio_ereditato_non_si_annulla_al_ricaricamento(tmp_path):
+    bundle = {"form": [_riga("ic-01", fedele="SI", ereditato_da="eval-precedente")]}
+    # `toccato` è la traccia di una decisione di chi giudica — anche quando la decisione
+    # è svuotare. Senza, l'eredità tornerebbe a coprire la cancellazione.
+    locali = {"ic-01": {"fedele": "", "causa": "", "ereditato_da": "", "toccato": "1"}}
+    g = _unisci(bundle, locali, {}, tmp_path)
+    assert g["ic-01"]["fedele"] == ""
