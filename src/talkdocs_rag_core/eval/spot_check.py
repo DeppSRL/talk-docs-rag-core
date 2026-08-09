@@ -38,7 +38,15 @@ from config import RagConfig
 # distinzione da cui dipende dove investire. Con la scheda che mostra TUTTI i passaggi del
 # contesto è una domanda a risposta oggettiva — «la risposta è in uno di questi cinque?».
 COLONNE_GIUDIZIO = ["fedele", "causa", "citazione_corretta", "italiano_1_5", "note"]
-COLONNE_FORM = ["run_id", "condition", "id", "categoria", "tipo", "domanda", *COLONNE_GIUDIZIO, "risposta"]
+# `ereditato_da` NON è una colonna di giudizio: non la compila l'umano, la scrive il
+# sistema quando riporta avanti un giudizio dato su una run precedente per una risposta
+# **identica** (vedi `app.judge`). Serve a rendere visibile la differenza fra un tasso di
+# fedeltà appena misurato e uno per la maggior parte ereditato: sono due affermazioni
+# diverse, e senza questa colonna la seconda si spaccerebbe per la prima.
+COLONNE_FORM = [
+    "run_id", "condition", "id", "categoria", "tipo", "domanda",
+    *COLONNE_GIUDIZIO, "ereditato_da", "risposta",
+]
 
 CAUSE_VALIDE = {"retrieval", "generazione"}
 
@@ -159,6 +167,7 @@ def build_form(records: list[dict], run_id: str, idx: dict) -> list[dict]:
                 "citazione_corretta": "",
                 "italiano_1_5": "",
                 "note": "",
+                "ereditato_da": "",
                 "risposta": _risposta(rec),
             }
         )

@@ -156,3 +156,74 @@ def test_le_colonne_del_csv_scritto_dal_browser_combaciano_con_quelle_di_python(
     blocco = re.search(r"const COLONNE = \[(.*?)\];", pagina.read_text(encoding="utf-8"), re.DOTALL)
     assert blocco, "lista COLONNE non trovata nella pagina"
     assert re.findall(r'"([a-z_0-9]+)"', blocco.group(1)) == COLONNE_FORM
+
+
+# --- Giudizio del solo delta ------------------------------------------------------------
+
+def _riga_giudicata(domanda, risposta, **kw):
+    base = {c: "" for c in COLONNE_FORM}
+    base.update({"run_id": "eval-vecchia", "condition": "off", "id": "ic-01",
+                 "domanda": domanda, "risposta": risposta, "fedele": "SI", "italiano_1_5": "5"})
+    base.update(kw)
+    return base
+
+
+def test_impronta_ignora_solo_il_whitespace(tmp_path):
+    """Tolleranza minima e nessun'altra: una parola diversa può cambiare la fedeltà, e un
+    confronto lasco farebbe ereditare giudizi a risposte che nessuno ha letto."""
+    assert judge.impronta("d", "una  risposta\nlunga") == judge.impronta("d", "una risposta lunga")
+    assert judge.impronta("d", "93 delibere") != judge.impronta("d", "94 delibere")
+    assert judge.impronta("d1", "uguale") != judge.impronta("d2", "uguale")
+
+
+def test_eredita_solo_le_risposte_identiche(tmp_path):
+    precedenti = {
+        judge.impronta("domanda uno", "risposta"): {"run_id": "eval-vecchia",
+                                                    "giudizio": {"fedele": "SI", "causa": "",
+                                                                 "citazione_corretta": "SI",
+                                                                 "italiano_1_5": "5", "note": ""}},
+    }
+    items = [judge.costruisci_item(_rec("domanda uno"), IDX, CHUNKS),
+             judge.costruisci_item(_rec("domanda due", answer_text="risposta DIVERSA"), IDX, CHUNKS)]
+    form = [
+        {**{c: "" for c in COLONNE_FORM}, "domanda": "domanda uno", "risposta": "risposta", "id": "ic-01"},
+        {**{c: "" for c in COLONNE_FORM}, "domanda": "domanda due", "risposta": "risposta DIVERSA", "id": "ic-02"},
+    ]
+    assert judge.eredita(items, form, precedenti) == 1
+    assert form[0]["fedele"] == "SI" and form[0]["ereditato_da"] == "eval-vecchia"
+    assert form[1]["fedele"] == "" and form[1]["ereditato_da"] == ""
+
+
+def test_le_righe_non_giudicate_non_si_ereditano(tmp_path):
+    """Una riga lasciata in bianco non è un giudizio: riportarla avanti fingerebbe una
+    copertura che non c'è."""
+    p = tmp_path / "eval-vecchia-giudizi-off.csv"
+    judge.scrivi_modulo(p, [_riga_giudicata("d", "r", fedele="")])
+    assert judge.indice_giudizi_precedenti(tmp_path) == {}
+
+
+def test_vince_il_giudizio_piu_recente(tmp_path):
+    judge.scrivi_modulo(tmp_path / "eval-20260801T000000Z-giudizi-off.csv",
+                        [_riga_giudicata("d", "r", fedele="NO")])
+    judge.scrivi_modulo(tmp_path / "eval-20260808T000000Z-giudizi-off.csv",
+                        [_riga_giudicata("d", "r", fedele="SI")])
+    trovato = judge.indice_giudizi_precedenti(tmp_path)[judge.impronta("d", "r")]
+    assert trovato["run_id"] == "eval-20260808T000000Z" and trovato["giudizio"]["fedele"] == "SI"
+
+
+def test_la_run_corrente_non_eredita_da_se_stessa(tmp_path):
+    judge.scrivi_modulo(tmp_path / "eval-corrente-giudizi-off.csv", [_riga_giudicata("d", "r")])
+    assert judge.indice_giudizi_precedenti(tmp_path, escludi_run="eval-corrente") == {}
+
+
+def test_toccare_un_giudizio_ereditato_lo_rende_proprio(tmp_path):
+    """Il conteggio degli ereditati dice quanta parte della fedeltà è stata riletta: un
+    giudizio dato a mano che continua a contarsi come ereditato lo falsa."""
+    p = tmp_path / "giudizi.csv"
+    form = _form(tmp_path)
+    form[0]["ereditato_da"] = "eval-vecchia"
+    form[0]["fedele"] = "SI"
+    judge.scrivi_modulo(p, form)
+    judge.salva_giudizio(p, form, "ic-01", {"fedele": "NO"})
+    riga = judge.leggi_modulo(p)[0]
+    assert riga["fedele"] == "NO" and riga["ereditato_da"] == ""

@@ -22,7 +22,9 @@ chiavi API e senza rete.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import re
 from pathlib import Path
 
 from config import RagConfig
@@ -53,6 +55,54 @@ def percorso_modulo(run_id: str, condition: str | None, out_dir: str | Path = RE
 
 def percorso_bundle(run_id: str, condition: str | None, out_dir: str | Path = REPORTS) -> Path:
     return Path(out_dir) / f"{run_id}-bundle{_suffix(condition)}.json"
+
+
+_WS = re.compile(r"\s+")
+
+
+def impronta(domanda: str, risposta: str) -> str:
+    """Identità di una **risposta giudicata**: domanda + testo servito.
+
+    È la chiave con cui un giudizio si riporta avanti da una run alla successiva. Il
+    confronto è sul testo integrale, non sull'`id` dell'item: due run possono rispondere
+    in modo diverso alla stessa domanda, ed è esattamente il caso in cui il giudizio
+    vecchio non vale più.
+
+    L'unica tolleranza è sul whitespace. Nessun'altra: una parola diversa può cambiare la
+    fedeltà, e un confronto lasco farebbe ereditare giudizi a risposte che nessuno ha
+    letto — cioè produrrebbe un tasso di fedeltà su affermazioni mai verificate, che è il
+    guasto peggiore immaginabile per questo banco.
+    """
+    testo = _WS.sub(" ", f"{domanda}\n{risposta}").strip()
+    return hashlib.sha256(testo.encode("utf-8")).hexdigest()[:16]
+
+
+def indice_giudizi_precedenti(reports_dir: str | Path = REPORTS, escludi_run: str | None = None) -> dict[str, dict]:
+    """``impronta → {run_id, giudizio}`` da tutti i moduli già compilati.
+
+    Se la stessa risposta è stata giudicata in più run vince la **più recente** (i nomi
+    delle run sono timestamp, quindi l'ordine alfabetico è quello cronologico): un
+    giudizio dato dopo una discussione vale più di quello dato prima.
+    """
+    d = Path(reports_dir)
+    if not d.is_dir():
+        return {}
+    out: dict[str, dict] = {}
+    for path in sorted(d.glob("*-giudizi-*.csv")):
+        run_id = path.name.split("-giudizi-")[0]
+        if escludi_run and run_id == escludi_run:
+            continue
+        for riga in leggi_modulo(path):
+            # Una riga senza `fedele` è un item lasciato in bianco: non è un giudizio e
+            # non va riportato avanti come se lo fosse.
+            if not (riga.get("fedele") or "").strip():
+                continue
+            k = impronta(riga.get("domanda", ""), riga.get("risposta", ""))
+            out[k] = {
+                "run_id": run_id,
+                "giudizio": {c: riga.get(c, "") for c in COLONNE_GIUDIZIO},
+            }
+    return out
 
 
 def _chiave(riga: dict) -> str:
@@ -117,6 +167,7 @@ def costruisci_item(rec: dict, idx: dict, chunks: dict) -> dict:
 
     return {
         "id": ident,
+        "impronta": impronta(rec["query"], _risposta(rec)),
         "categoria": categoria,
         "tipo": _tipo(rec),
         "route": rec.get("route") or "pointwise",
@@ -136,6 +187,33 @@ def costruisci_item(rec: dict, idx: dict, chunks: dict) -> dict:
     }
 
 
+def eredita(items: list[dict], form: list[dict], precedenti: dict[str, dict]) -> int:
+    """Riporta avanti i giudizi dati su risposte **identiche** in run precedenti.
+
+    È ciò che rende sostenibile il ciclo: fra due run la maggior parte delle risposte non
+    cambia, e rileggerle tutte a ogni iterazione è il costo che ha tenuto la fedeltà ferma
+    per tre run. Qui si rilegge solo il **delta**.
+
+    L'ereditarietà è visibile e revocabile: la riga porta `ereditato_da`, la UI lo dichiara
+    in testa all'item, e toccare un qualunque campo di giudizio la cancella — da quel
+    momento il giudizio è tuo, non riportato.
+    """
+    per_impronta = {i["impronta"]: i for i in items}
+    n = 0
+    for riga in form:
+        it = per_impronta.get(impronta(riga.get("domanda", ""), riga.get("risposta", "")))
+        if it is None:
+            continue
+        trovato = precedenti.get(it["impronta"])
+        if trovato is None:
+            continue
+        riga.update(trovato["giudizio"])
+        riga["ereditato_da"] = trovato["run_id"]
+        it["ereditato_da"] = trovato["run_id"]
+        n += 1
+    return n
+
+
 def costruisci_bundle(cfg: RagConfig, run_id: str, condition: str | None, eval_set: str) -> dict:
     records = _selezione(_load_audit(run_id, cfg.audit_log_dir), condition)
     if not records:
@@ -143,14 +221,18 @@ def costruisci_bundle(cfg: RagConfig, run_id: str, condition: str | None, eval_s
     idx = _index_eval_set(eval_set)
     da_giudicare = [r for r in records if _da_giudicare(r)]
     chunks = _fetch_chunks(cfg, [cid for r in da_giudicare for cid in _contesto(r)])
+    items = [costruisci_item(r, idx, chunks) for r in da_giudicare]
+    # Il modulo si crea qui, così la UI non deve saper generare righe: le trova o le
+    # scrive tutte insieme alla prima apertura.
+    form = build_form(records, run_id, idx)
+    n_ereditati = eredita(items, form, indice_giudizi_precedenti(REPORTS, escludi_run=run_id))
     return {
         "run_id": run_id,
         "condition": condition,
         "model": cfg.mistral_model,
-        "items": [costruisci_item(r, idx, chunks) for r in da_giudicare],
-        # Il modulo si crea qui, così la UI non deve saper generare righe: le trova o le
-        # scrive tutte insieme alla prima apertura.
-        "form": build_form(records, run_id, idx),
+        "items": items,
+        "form": form,
+        "n_ereditati": n_ereditati,
     }
 
 
@@ -204,6 +286,11 @@ def salva_giudizio(path: Path, form_iniziale: list[dict], chiave: str, valori: d
     for col in COLONNE_GIUDIZIO:
         if col in valori:
             trovata[col] = "" if valori[col] is None else str(valori[col])
+            # Toccata la riga, il giudizio non è più riportato da un'altra run: è di chi
+            # sta guardando adesso. Lasciare `ereditato_da` valorizzato farebbe contare
+            # come ereditato un giudizio dato a mano — e il conteggio degli ereditati
+            # serve proprio a dire quanta parte del tasso di fedeltà è stata riletta.
+            trovata["ereditato_da"] = ""
     scrivi_modulo(path, righe)
     return trovata
 
@@ -211,7 +298,10 @@ def salva_giudizio(path: Path, form_iniziale: list[dict], chiave: str, valori: d
 def stato_modulo(path: Path, form_iniziale: list[dict]) -> dict[str, dict]:
     """`chiave → giudizio corrente`. Permette alla UI di riaprirsi dove si era rimasti."""
     righe = leggi_modulo(path) or form_iniziale
-    return {_chiave(r): {c: r.get(c, "") for c in COLONNE_GIUDIZIO} for r in righe}
+    return {
+        _chiave(r): {**{c: r.get(c, "") for c in COLONNE_GIUDIZIO}, "ereditato_da": r.get("ereditato_da", "")}
+        for r in righe
+    }
 
 
 def run_disponibili(audit_dir: str | Path, solo_eval: bool = True) -> list[str]:

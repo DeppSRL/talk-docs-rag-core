@@ -98,6 +98,13 @@ def aggregate(rows: list[dict]) -> dict:
     n_totali = len(rows)
     fedeli, infedeli, cit_ok, cit_no, voti = 0, 0, 0, 0, []
     giudicati = 0
+    # Quanti giudizi sono stati RIPORTATI da una run precedente invece che riletti adesso.
+    # Un 92% con trenta giudizi su trentaquattro ereditati non è la stessa affermazione di
+    # un 92% appena misurato: la prima dice che il sistema non è cambiato dove era già
+    # stato verificato, la seconda che qualcuno ha letto tutto. Senza questo numero le due
+    # si confondono, ed è esattamente il tipo di confusione che questo banco esiste per
+    # evitare.
+    ereditati = 0
     infedeli_ids: list[str] = []
     cause = {"retrieval": 0, "generazione": 0, "strutturale": 0}
     infedeli_senza_causa: list[str] = []
@@ -109,6 +116,8 @@ def aggregate(rows: list[dict]) -> dict:
         if f is None and c is None and v is None:
             continue
         giudicati += 1
+        if (r.get("ereditato_da") or "").strip():
+            ereditati += 1
         etichetta = r.get("id") or r.get("domanda", "")[:40]
         if f is True:
             fedeli += 1
@@ -133,6 +142,8 @@ def aggregate(rows: list[dict]) -> dict:
     return {
         "n_totali": n_totali,
         "n_giudicati": giudicati,
+        "n_ereditati": ereditati,
+        "n_riletti": giudicati - ereditati,
         "copertura": round(giudicati / n_totali, 3) if n_totali else 0.0,
         "n_fedeli": fedeli,
         "n_infedeli": infedeli,
@@ -161,6 +172,12 @@ def build_report(run_id: str, condition: str | None, agg: dict) -> str:
         f"- condizione: **{condition or 'tutte'}**",
         f"- item da giudicare: **{agg['n_totali']}**  ·  giudicati: **{agg['n_giudicati']}**  "
         f"(copertura {pct(agg['copertura'])})",
+        (
+            f"- di cui **riletti in questa tornata: {agg['n_riletti']}**, ereditati da run "
+            f"precedenti su risposta identica: {agg['n_ereditati']}"
+            if agg["n_ereditati"]
+            else "- tutti i giudizi sono stati dati su questa run"
+        ),
         "",
         "| Metrica | Valore |",
         "|---|---|",
