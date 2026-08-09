@@ -7,6 +7,8 @@ che non si può sbagliare due volte: **un giudizio già dato non si perde**.
 """
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -128,3 +130,29 @@ def test_le_run_di_singole_ask_non_finiscono_nel_menu(tmp_path):
         (tmp_path / f"{nome}.jsonl").write_text("{}\n", encoding="utf-8")
     assert judge.run_disponibili(tmp_path) == ["eval-20260808T152700Z", "eval-20260807T181416Z"]
     assert len(judge.run_disponibili(tmp_path, solo_eval=False)) == 4
+
+
+def test_la_pagina_di_giudizio_e_una_sola():
+    """La serve FastAPI in locale ed è la stessa che Vercel pubblica statica. Una copia in
+    `app/static/` divergerebbe da quella in `web/public/` nel giro di poche modifiche, e
+    la peggiore delle due sarebbe quella su cui si giudica.
+
+    Il controllo NON importa `app.web`: quel modulo tira dentro FastAPI, e
+    `test_vendor_import` verifica proprio che la suite non se lo trascini. Si legge il
+    sorgente, che per questa invariante è sufficiente.
+    """
+    radice = Path(__file__).resolve().parent.parent
+    assert (radice / "web" / "public" / "index.html").exists()
+    assert not (radice / "app" / "static" / "judge.html").exists(), "copia superata della pagina"
+    sorgente = (radice / "app" / "web.py").read_text(encoding="utf-8")
+    assert '"web" / "public" / "index.html"' in sorgente
+
+
+def test_le_colonne_del_csv_scritto_dal_browser_combaciano_con_quelle_di_python():
+    """La pagina costruisce il CSV in JavaScript quando gira su Vercel: se le due liste
+    divergono, `eval-human` legge colonne che non esistono e la fedeltà esce vuota — senza
+    che nulla fallisca."""
+    pagina = Path(__file__).resolve().parent.parent / "web" / "public" / "index.html"
+    blocco = re.search(r"const COLONNE = \[(.*?)\];", pagina.read_text(encoding="utf-8"), re.DOTALL)
+    assert blocco, "lista COLONNE non trovata nella pagina"
+    assert re.findall(r'"([a-z_0-9]+)"', blocco.group(1)) == COLONNE_FORM
