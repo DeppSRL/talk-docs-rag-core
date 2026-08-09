@@ -190,6 +190,21 @@ class RagConfig:
     # errore visibile — si traveste da decisione di instradamento.
     router_llm_max_retries: int = 8
 
+    # --- Resilienza dell'eval ---
+    # Il retry dell'SDK (`http_max_retries`) copre il 429 istantaneo, non il rate limit
+    # *sostenuto*: i suoi backoff stanno nell'ordine dei secondi, e una finestra di quota
+    # esaurita dura di più. Misurato il 9 agosto: la run `eval-20260809T130308Z` è morta
+    # all'item 104 su 110 — 104 risposte già pagate al provider, zero report, zero bundle,
+    # perché una singola eccezione risaliva fino a `run_eval`. Il numero di chiamate era
+    # cresciuto lo stesso giorno (il ramo meta ha smesso di essere a zero chiamate).
+    #
+    # Due meccanismi distinti, e servono entrambi: qui la pausa lunga fra i tentativi, e
+    # in `_run_condition` il fatto che l'esaurimento dei tentativi produca una **riga di
+    # errore** invece di uccidere la run. Un item morto è un dato mancante, non un esito:
+    # nel CSV ha la colonna `errore` valorizzata e tutte le colonne di giudizio vuote.
+    eval_item_max_retries: int = 4
+    eval_item_backoff_s: float = 20.0
+
     # --- Pricing (M1: da confermare in console La Plateforme) — EUR/USD per 1M token ---
     price_input_per_mtok: float = 0.0
     price_output_per_mtok: float = 0.0
@@ -245,6 +260,8 @@ class RagConfig:
             router_llm_enabled=_get_bool("ROUTER_LLM_ENABLED", cls.router_llm_enabled),
             router_llm_max_tokens=_get_int("ROUTER_LLM_MAX_TOKENS", cls.router_llm_max_tokens),
             router_llm_max_retries=_get_int("ROUTER_LLM_MAX_RETRIES", cls.router_llm_max_retries),
+            eval_item_max_retries=_get_int("EVAL_ITEM_MAX_RETRIES", cls.eval_item_max_retries),
+            eval_item_backoff_s=_get_float("EVAL_ITEM_BACKOFF_S", cls.eval_item_backoff_s),
             price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", cls.price_input_per_mtok),
             price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", cls.price_output_per_mtok),
             price_cached_per_mtok=_get_float("PRICE_CACHED_PER_MTOK", cls.price_cached_per_mtok),

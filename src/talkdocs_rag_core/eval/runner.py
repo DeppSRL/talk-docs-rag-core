@@ -16,6 +16,7 @@ correttezza citazione) sono lasciate vuote da compilare.
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import json
 import statistics
@@ -75,7 +76,7 @@ def _cost(cfg: RagConfig, usage: dict) -> float:
     ) / 1_000_000
 
 
-def _row(cfg: RagConfig, item: EvalItem, condition: str, res) -> dict:
+def _row(cfg: RagConfig, item: EvalItem, condition: str, res, errore: str = "") -> dict:
     usage = res.usage or {}
     # «Declinata» = la pipeline non ha dato una risposta sicura, per rifiuto deterministico
     # (sotto soglia di supporto) **o** per astensione (in tema ma senza la cosa chiesta).
@@ -157,7 +158,18 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res) -> dict:
         "latency_wall_s": round(res.latency_wall_s, 3) if res.latency_wall_s is not None else "",
         "question": item.question,
         "answer": res.answer_text,
+        # Vuota quando la domanda è stata servita. Valorizzata, dice che il provider non ha
+        # risposto dopo tutti i tentativi: la riga esiste per **non far sparire l'item**.
+        "errore": errore,
     }
+    if errore:
+        # Un item morto è un dato **mancante**, non un esito. Lasciarlo nelle metriche lo
+        # farebbe passare per una decisione: `refused=1` diventerebbe un rifiuto corretto
+        # sulle `out_of_corpus` e uno sbagliato sulle `in_corpus`, e in entrambi i casi il
+        # numero misurerebbe la rete. È lo stesso travestimento già documentato per le
+        # classificazioni fallite del router — qui si toglie dal denominatore, non si conta.
+        for k in ("refusal_correct", "source_id_ok", "route_ok", "value_ok"):
+            row[k] = ""
     return row
 
 
@@ -195,6 +207,70 @@ def _verdict(res) -> str:
     )
 
 
+def _risultato_errore(cfg: RagConfig, query: str, errore: str) -> object:
+    """Segnaposto per un item che il provider non ha servito.
+
+    Non è un rifiuto e non deve somigliargli: `refused` resta `False` (un rifiuto è una
+    *decisione* del sistema, questo è un buco) e le colonne di giudizio le azzera `_row`.
+    Serve solo a tenere la riga nel CSV con le stesse chiavi delle altre.
+    """
+    from rag.generation import RagResult
+
+    return RagResult(
+        query=query,
+        answer_text=f"[nessuna risposta: {errore}]",
+        refused=False,
+        refusal_reason=None,
+        support_score=float("nan"),
+        cited_passages=[],
+        cited_chunk_ids=[],
+        invalid_citations=[],
+        claims=[],
+        passages=[],
+        usage={},
+        raw_output="",
+        model=cfg.mistral_model,
+        params={"model": cfg.mistral_model},
+    )
+
+
+async def _ask_con_ripresa(pipeline, item: EvalItem, condition: str, i: int) -> tuple[object, str]:
+    """Una domanda, con pausa lunga sul rate limit. Ritorna `(risultato, errore)`.
+
+    Il retry dell'SDK copre il 429 istantaneo; questo copre la **finestra di quota
+    esaurita**, che dura decine di secondi. Backoff esponenziale a partire da
+    `eval_item_backoff_s`: alla fine dei tentativi si restituisce un segnaposto e la run
+    prosegue. Perdere un item è un difetto; perdere 104 item già pagati per colpa del
+    centocinquesimo è un difetto del banco di misura.
+    """
+    from openai import APIConnectionError, APITimeoutError, RateLimitError
+
+    cfg = pipeline.cfg
+    ultimo = ""
+    for tentativo in range(cfg.eval_item_max_retries + 1):
+        try:
+            if condition == "off":
+                return (
+                    await pipeline.ask(
+                        item.question, use_cache=False, provider_cache_key=f"eval-off-{item.id}-{i}"
+                    ),
+                    "",
+                )
+            return await pipeline.ask(item.question, use_cache=True, provider_cache_key=None), ""
+        except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
+            ultimo = f"{exc.__class__.__name__}"
+            if tentativo == cfg.eval_item_max_retries:
+                break
+            pausa = cfg.eval_item_backoff_s * (2**tentativo)
+            print(
+                f"    ⏸  {ultimo} su {item.id}: pausa {pausa:.0f}s "
+                f"(tentativo {tentativo + 1}/{cfg.eval_item_max_retries})",
+                flush=True,
+            )
+            await asyncio.sleep(pausa)
+    return _risultato_errore(pipeline.cfg, item.question, ultimo), ultimo
+
+
 async def _run_condition(pipeline, items: list[EvalItem], condition: str, writer) -> list[dict]:
     # stato pulito della cache semantica all'inizio di ogni condizione
     pipeline.semantic_cache.clear()
@@ -203,18 +279,17 @@ async def _run_condition(pipeline, items: list[EvalItem], condition: str, writer
     t_start = time.perf_counter()
     print(f"[eval:{condition.upper():3s}] avvio — {n} domande, cache semantica azzerata", flush=True)
     for i, item in enumerate(items):
-        if condition == "off":
-            res = await pipeline.ask(item.question, use_cache=False, provider_cache_key=f"eval-off-{item.id}-{i}")
-        else:
-            res = await pipeline.ask(item.question, use_cache=True, provider_cache_key=None)
-        writer.record(res, pipeline.corpus_version, cache_enabled=(condition == "on"))
-        rows.append(_row(pipeline.cfg, item, condition, res))
+        res, errore = await _ask_con_ripresa(pipeline, item, condition, i)
+        if not errore:
+            writer.record(res, pipeline.corpus_version, cache_enabled=(condition == "on"))
+        rows.append(_row(pipeline.cfg, item, condition, res, errore=errore))
 
         # --- progresso in chiaro, una riga per domanda, flushata subito ---
         elapsed = time.perf_counter() - t_start
+        esito = f"✖ NON SERVITA ({errore})" if errore else _verdict(res)
         print(
             f"[eval:{condition.upper():3s}] {i + 1:2d}/{n} {item.id:<12s} "
-            f"lat={res.latency_s or 0:6.2f}s  {_verdict(res)}"
+            f"lat={res.latency_s or 0:6.2f}s  {esito}"
             f"   [{elapsed / 60:.1f}m trascorsi]",
             flush=True,
         )
@@ -233,7 +308,13 @@ async def _run_condition(pipeline, items: list[EvalItem], condition: str, writer
 
 
 def _aggregate(cfg: RagConfig, rows: list[dict], condition: str) -> dict:
-    sub = [r for r in rows if r["condition"] == condition]
+    tutte = [r for r in rows if r["condition"] == condition]
+    # `n_errori` si conta su TUTTE le righe; ogni altra metrica sulle sole domande servite.
+    # Un item morto ha `refused=0` e `uncertain=0` — se restasse in `sub` passerebbe per
+    # una risposta data, gonfierebbe il denominatore di `citation_validity` e diluirebbe
+    # `semantic_hit_rate`. Non è un esito cattivo: non è un esito.
+    n_errori = sum(1 for r in tutte if r.get("errore"))
+    sub = [r for r in tutte if not r.get("errore")]
     scored = [r for r in sub if r["refusal_correct"] != ""]
     answered = [r for r in sub if r["refused"] == 0 and r.get("uncertain", 0) == 0]
     n_uncertain = sum(r.get("uncertain", 0) for r in sub)
@@ -297,6 +378,10 @@ def _aggregate(cfg: RagConfig, rows: list[dict], condition: str) -> dict:
         "n_structured": sum(1 for r in sub if r["route"] == "structured"),
         "n_uncovered": sum(1 for r in sub if r["route"] == "uncovered"),
         "n_meta": sum(1 for r in sub if r["route"] == "meta"),
+        # Domande che il provider non ha servito. Fuori da ogni denominatore di merito, ma
+        # **dentro il report**: una metrica calcolata su 49 item quando l'eval set ne ha 55
+        # è un'altra metrica, e chi legge deve poterlo vedere senza aprire il CSV.
+        "n_errori": n_errori,
         # Router agentico: chiamate, decisioni servite, token e costo — separati dal costo
         # di generazione, così l'A/B lessicale vs +LLM si legge dal report senza scavare.
         "router_llm_calls": sum(1 for r in sub if r["router_llm_tokens"] > 0),
@@ -443,6 +528,21 @@ def _markdown(
         "> non è un instradamento sbagliato, è un dato mancante travestito da decisione. Con un",
         "> valore diverso da zero le due righe qui sopra vanno lette come limite inferiore.",
     ]
+
+    n_errori = agg_off["n_errori"] + agg_on["n_errori"]
+    if n_errori:
+        morti = sorted({r["id"] for r in rows if r.get("errore")})
+        causali = sorted({r["errore"] for r in rows if r.get("errore")})
+        lines += [
+            "",
+            f"> ⚠️ **Run incompleta: {n_errori} domande non servite dal provider** "
+            f"(OFF {agg_off['n_errori']}, ON {agg_on['n_errori']}) — {', '.join(causali)}.",
+            f"> Item: {', '.join(f'`{m}`' for m in morti)}.",
+            "> Sono **fuori da tutti i denominatori** di questo report: non sono rifiuti né",
+            "> risposte senza fonte, sono dati mancanti. Le percentuali qui sopra vanno lette",
+            "> su un campione più piccolo del dichiarato, e l'A/B del caching è **sbilanciato**",
+            "> se i mancanti non cadono nelle stesse domande nei due bracci.",
+        ]
 
     drift = max(agg_off["suspend_drift_s"], agg_on["suspend_drift_s"])
     if drift > 60:
