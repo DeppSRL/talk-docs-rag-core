@@ -64,6 +64,32 @@ def test_chunk_mancante_e_dichiarato_non_finto():
     assert it["passaggi"][0]["testo"] == ""
 
 
+def test_i_passaggi_della_scheda_si_leggono_dalla_tupla_non_dall_indice():
+    """Il ramo meta cita passaggi che nell'indice non esistono e non esisteranno mai.
+
+    Il testo lo porta la tupla di audit: senza, la UI mostrava «mancante» su tutte le
+    citazioni delle risposte meta — e una citazione che non si può aprire non si può
+    giudicare, quindi l'item finiva giudicato sulla sola prosa.
+    """
+    rec = _rec(
+        "domanda uno",
+        route="meta",
+        cited_chunk_ids=["scheda::00-contesto"],
+        retrieved_chunk_ids=["scheda::00-contesto", "scheda::perimetro"],
+        passages_inline={
+            "scheda::00-contesto": {"source": "scheda del corpus — 00-contesto", "text": "Le delibere CIPE…"},
+            "scheda::perimetro": {"source": "perimetro calcolato", "text": "Perimetro indicizzato: 511 delibere"},
+        },
+    )
+    it = judge.costruisci_item(rec, IDX, {})  # indice vuoto: è il caso reale, non un limite del test
+    assert [p["mancante"] for p in it["passaggi"]] == [False, False]
+    assert it["passaggi"][0]["testo"] == "Le delibere CIPE…"
+    assert it["passaggi"][0]["titolo"] == "scheda del corpus — 00-contesto"
+    assert [p["citato"] for p in it["passaggi"]] == [True, False]
+    # Il numero deve poter essere verificato: se la cifra sta qui, la si può cercare.
+    assert "511 delibere" in it["passaggi"][1]["testo"]
+
+
 def _form(tmp_path):
     return [
         {**{c: "" for c in COLONNE_FORM}, "run_id": "r1", "condition": "off", "id": "ic-01", "domanda": "domanda uno"},

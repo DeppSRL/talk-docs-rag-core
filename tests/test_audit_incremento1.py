@@ -51,3 +51,35 @@ def test_la_tupla_porta_l_esito_verbatim_anche_a_guardia_spenta(tmp_path):
     assert riga["verbatim"]["valid_ratio"] == 0.5
     assert riga["verbatim"]["n_misattributed"] == 1
     assert riga["structured"] is None
+
+
+def test_i_passaggi_fuori_indice_viaggiano_dentro_la_tupla(tmp_path):
+    """Una citazione che nessuno può più risolvere non è una citazione.
+
+    I passaggi del ramo meta — sezioni della scheda e blocco delle statistiche calcolate —
+    esistono solo in memoria al momento della risposta: il vector store non li contiene e
+    non li conterrà. Se la tupla registrasse i soli `chunk_id`, la risposta risulterebbe
+    citata e sarebbe indifendibile. Quelli che vengono dall'indice restano fuori: lì il
+    `chunk_id` è già la chiave per rileggerli, e duplicarne il testo gonfierebbe l'audit.
+    """
+    from rag.generation import Passage
+
+    res = RagResult(
+        query="Di cosa parla questo corpus?", answer_text="Raccoglie delibere CIPE [1] …",
+        refused=False, refusal_reason=None, support_score=0.0, cited_passages=[1],
+        cited_chunk_ids=["scheda::00-contesto"], invalid_citations=[], claims=[],
+        passages=[
+            Passage(1, "scheda::00-contesto", "scheda del corpus — 00-contesto", "Le delibere CIPE…", in_index=False),
+            Passage(2, "scheda::perimetro", "perimetro calcolato", "Perimetro: 511 delibere", in_index=False),
+            Passage(3, "c-42", "Delibera n. 1/2024", "testo dall'indice", in_index=True),
+        ],
+        usage={}, raw_output="", model="test", params={}, route="meta",
+    )
+    w = AuditWriter("run-meta", str(tmp_path))
+    w.record(res, corpus_version="v1", cache_enabled=False)
+    riga = json.loads(w.path.read_text(encoding="utf-8").strip())
+
+    assert set(riga["passages_inline"]) == {"scheda::00-contesto", "scheda::perimetro"}
+    assert riga["passages_inline"]["scheda::perimetro"]["text"].endswith("511 delibere")
+    assert riga["passages_inline"]["scheda::00-contesto"]["source"].startswith("scheda del corpus")
+    assert riga["retrieved_chunk_ids"] == ["scheda::00-contesto", "scheda::perimetro", "c-42"]

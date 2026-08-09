@@ -40,6 +40,7 @@ from scripts.spot_check import (
     _selezione,
     _tipo,
     build_form,
+    chunk_risolto,
 )
 
 REPORTS = Path("eval/reports")
@@ -122,16 +123,19 @@ def costruisci_item(rec: dict, idx: dict, chunks: dict) -> dict:
     citati = set(rec.get("cited_chunk_ids") or [])
     passaggi = []
     for n, cid in enumerate(_contesto(rec), start=1):
-        ch = chunks.get(cid) or {}
-        meta = ch.get("meta") or {}
+        # `chunk_risolto` guarda anche dentro la tupla: i passaggi del ramo meta non stanno
+        # nell'indice. Senza, la UI mostrava le citazioni della scheda come rimandi vuoti —
+        # e una citazione che non si può aprire non si può giudicare.
+        ch = chunk_risolto(rec, cid, chunks)
+        meta = (ch or {}).get("meta") or {}
         passaggi.append(
             {
                 "n": n,
                 "chunk_id": cid,
                 "titolo": meta.get("title") or meta.get("source") or "?",
-                "testo": (ch.get("text") or "").strip(),
+                "testo": ((ch or {}).get("text") or "").strip(),
                 "citato": cid in citati,
-                "mancante": cid not in chunks,
+                "mancante": ch is None,
             }
         )
 

@@ -87,6 +87,25 @@ def _fetch_chunks(cfg: RagConfig, chunk_ids: list[str]) -> dict[str, dict]:
     }
 
 
+def chunk_risolto(rec: dict, cid: str, chunks: dict) -> dict | None:
+    """Testo e metadati di un passaggio, dall'indice **o** dalla tupla di audit.
+
+    Non tutti i passaggi vengono dal vector store: quelli del ramo meta — sezioni della
+    scheda del corpus e blocco delle statistiche calcolate — esistono in memoria al momento
+    della risposta e da nessuna altra parte. Per questo la tupla se li porta dentro
+    (`passages_inline`), e per questo si guarda lì prima di dichiarare un passaggio
+    introvabile: una citazione che non si può aprire non si può giudicare, e verrebbe letta
+    come un guasto dell'indice invece che come un passaggio di natura diversa.
+    """
+    ch = chunks.get(cid)
+    if ch is not None:
+        return ch
+    inline = (rec.get("passages_inline") or {}).get(cid)
+    if inline is None:
+        return None
+    return {"text": inline.get("text") or "", "meta": {"source": inline.get("source") or ""}}
+
+
 def _risposta(rec: dict) -> str:
     """Il testo della risposta, con fallback per le run anteriori ad ``answer_text``.
 
@@ -286,7 +305,7 @@ def build_sheet(
             ]
         for n, cid in enumerate(contesto, start=1):
             marca = "**CITATO**" if cid in cited else "non citato"
-            ch = chunks.get(cid)
+            ch = chunk_risolto(rec, cid, chunks)
             if ch is None:
                 lines += [f"- `[{n}]` {marca} `{cid}` — **non trovato nel vector store**", ""]
                 continue

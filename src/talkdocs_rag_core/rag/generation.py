@@ -82,6 +82,15 @@ class Passage:
     chunk_id: str
     source: str
     content: str
+    # Il `chunk_id` è risolvibile nell'indice? Vero per tutto ciò che viene dal retrieval;
+    # falso per i passaggi del ramo meta (sezioni della scheda, blocco delle statistiche),
+    # che esistono solo in memoria al momento della risposta.
+    #
+    # Non è un dettaglio di implementazione: una citazione a un passaggio che nessuno può
+    # più rileggere **non è una citazione**. Chi giudica la vedrebbe come un rimando vuoto,
+    # e l'audit non permetterebbe di difendere la risposta. Quando è falso, il testo del
+    # passaggio viaggia dentro la tupla di audit (`passages_inline`).
+    in_index: bool = True
 
 
 @dataclass

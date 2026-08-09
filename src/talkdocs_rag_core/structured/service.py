@@ -142,6 +142,7 @@ def _passaggi_meta(
                     chunk_id=f"scheda::{nome}",
                     source=f"scheda del corpus — {nome}",
                     content=testo,
+                    in_index=False,
                 )
             )
 
@@ -157,7 +158,13 @@ def _passaggi_meta(
             "l'archivio storico completo è più ampio."
         )
         passaggi.append(
-            Passage(n=len(passaggi) + 1, chunk_id="scheda::perimetro", source="perimetro calcolato", content=testo)
+            Passage(
+                n=len(passaggi) + 1,
+                chunk_id="scheda::perimetro",
+                source="perimetro calcolato",
+                content=testo,
+                in_index=False,
+            )
         )
         esito = StructuredOutcome(
             intent=_INTENT_CORPUS_STATS,

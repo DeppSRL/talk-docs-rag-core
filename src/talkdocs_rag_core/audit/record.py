@@ -40,6 +40,15 @@ class AuditRecord:
     # il chunk con la cifra corretta non era nei primi 20, e il support_score era 0,878 —
     # la pipeline era al massimo della fiducia con le prove sbagliate in mano.
     retrieved_chunk_ids: list[str]
+    # Testo dei passaggi che NON stanno nell'indice, per `chunk_id`. Sono le sezioni della
+    # scheda del corpus e il blocco delle statistiche calcolate del ramo meta: esistono in
+    # memoria al momento della risposta e da nessuna altra parte.
+    #
+    # Senza questo campo la tupla registra citazioni `scheda::…` che nessuno può più
+    # risolvere — chi giudica vede un rimando vuoto e la risposta non è difendibile. È lo
+    # stesso motivo per cui `answer_text` è nella tupla invece di essere dedotta da
+    # `raw_output`: l'audit deve **contenere** ciò che serve a rigiocare, non rimandarci.
+    passages_inline: dict[str, dict]
     invalid_citations: list[int]
     claims: list[dict]
     # caching
@@ -119,6 +128,11 @@ class AuditWriter:
             cited_chunk_ids=result.cited_chunk_ids,
             chunk_hashes=_chunk_hashes(result),
             retrieved_chunk_ids=[p.chunk_id for p in result.passages],
+            passages_inline={
+                p.chunk_id: {"source": p.source, "text": p.content}
+                for p in result.passages
+                if not getattr(p, "in_index", True)
+            },
             invalid_citations=result.invalid_citations,
             claims=result.claims,
             uncertain=result.uncertain,
