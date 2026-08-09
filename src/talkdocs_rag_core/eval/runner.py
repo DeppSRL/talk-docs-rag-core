@@ -85,10 +85,17 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res) -> dict:
     answered = not declined
     route = getattr(res, "route", "pointwise")
     strutturata = route == "structured"
-    # La fonte di una risposta calcolata è la query eseguita, non un chunk_id; quella di
-    # una risposta meta è la scheda del corpus (più la query delle statistiche). Senza
-    # questi rami la metrica segnerebbe «senza fonte» una risposta perfetta.
-    source_ok = answered and (strutturata or route == "meta" or len(res.cited_chunk_ids) > 0)
+    # La fonte di una risposta calcolata è la query eseguita, non un chunk_id: senza questo
+    # ramo la metrica segnerebbe «senza fonte» una risposta perfetta.
+    #
+    # Il ramo meta invece **cita**: da quando la risposta è generata, i suoi passaggi sono le
+    # sezioni della scheda e il blocco del perimetro, e i `chunk_id` (`scheda::…`) finiscono
+    # in `cited_chunk_ids` come qualsiasi altra citazione. Un'eccezione incondizionata qui
+    # segnerebbe «con fonte» anche una meta-risposta che non ha citato nulla — cioè proprio
+    # il caso che la metrica esiste per intercettare. L'unica esenzione è il degrado alla
+    # scheda integrale (`usage` vuoto = nessuna chiamata): lì la risposta *è* la fonte.
+    meta_degradata = route == "meta" and not usage
+    source_ok = answered and (strutturata or meta_degradata or len(res.cited_chunk_ids) > 0)
     # Il costo del router agentico è un costo, ma un ALTRO costo: colonne sue, mai
     # sommate a `usage` — sul ramo strutturato «usage vuoto per costruzione» deve restare
     # vero anche con il classificatore acceso.
@@ -162,7 +169,11 @@ def _verdict(res) -> str:
     if getattr(res, "route", "pointwise") == "meta":
         s = getattr(res, "structured", None)
         stats = f"scheda + {s.computed_value} delibere" if s is not None else "scheda, senza statistiche"
-        return f"META ({stats})  [0 chiamate di risposta]{llm_tag}"
+        # La risposta meta è generata: dire «0 chiamate» sarebbe falso. Quando invece la
+        # generazione è degradata (usage vuoto) la chiamata davvero non c'è stata, e il
+        # marcatore lo dice — è la differenza fra una prosa e la scheda riversata.
+        modo = f"{len(res.cited_passages)} citazioni" if res.usage else "degrado: scheda integrale"
+        return f"META ({stats}, {modo}){llm_tag}"
     if getattr(res, "route", "pointwise") == "structured" and res.structured is not None:
         s = res.structured
         return f"CALCOLATA ({s.intent}) → {s.computed_value}  righe={s.n_rows}  [0 chiamate]{llm_tag}"
@@ -311,7 +322,7 @@ def _per_categoria(rows: list[dict], condition: str) -> list[str]:
         "near_miss": "rifiuto/astensione",
         "aggregazione": "risposta *calcolata* sul manifest o rifiuto dichiarato",
         "out_of_corpus": "rifiuto",
-        "meta": "risposta dalla scheda del corpus + statistiche calcolate",
+        "meta": "risposta generata sulla scheda del corpus + statistiche calcolate",
         "borderline": "(categoria legacy, ambigua)",
     }
     for c in cats:

@@ -375,6 +375,32 @@ class MistralGenerator:
         if self.cfg.abstention_idf_threshold > 0 and segnale >= self.cfg.abstention_idf_threshold:
             return self._uncertain_result(query, support, passages, segnale, mancanti)
 
+        return self.genera_da_passaggi(
+            query, passages, cache_key, support=support, segnale=segnale, mancanti=mancanti
+        )
+
+    def genera_da_passaggi(
+        self,
+        query: str,
+        passages: list[Passage],
+        cache_key: str,
+        support: float = 1.0,
+        segnale: float = 0.0,
+        mancanti: list[str] | None = None,
+    ) -> RagResult:
+        """Generazione grounded su passaggi **già costruiti**, non venuti dal retrieval.
+
+        La usa il ramo meta (`structured.service.serve_meta`), dove i «passaggi» sono le
+        sezioni della scheda del corpus e il blocco di statistiche calcolate. Il contratto
+        è identico — stesso `SYSTEM_PREFIX` (quindi stesso prefisso cache-friendly), stesso
+        schema di output, stessa verifica delle citazioni e stessa guardia verbatim — e
+        questo è il punto: **una cifra che il modello scrive senza che stia nella scheda o
+        nel blocco calcolato risulta non verificata**, esattamente come su una delibera.
+
+        Le due guardie che dipendono dal retrieval (soglia di supporto e guardiano IDF)
+        non si applicano: qui i passaggi non sono stati recuperati, sono dati.
+        """
+        mancanti = mancanti or []
         messages = self._messages(passages, query)
         response = self._call(messages, cache_key)
         scelta = response.choices[0]

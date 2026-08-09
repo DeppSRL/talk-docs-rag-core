@@ -101,7 +101,10 @@ class RagPipeline:
                 return _finish(self._tag(serve_uncovered(self.cfg, query, rotta), rotta), t0, w0)
             if rotta.route == router.META:
                 if self.card is not None or self.store is not None:
-                    return _finish(self._tag(serve_meta(self.cfg, self.store, self.card, query, rotta), rotta), t0, w0)
+                    servita = serve_meta(
+                        self.cfg, self.store, self.card, query, rotta, generator=self.generator
+                    )
+                    return _finish(self._tag(servita, rotta), t0, w0)
                 # Come per il ramo aggregativo senza manifest: si degrada contando, non in silenzio.
                 logger.warning(
                     "ramo meta disattivato (nessuna scheda né manifest): meta-domanda "

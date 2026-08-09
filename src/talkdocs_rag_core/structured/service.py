@@ -1,8 +1,12 @@
-"""Dal router al ``RagResult``: il ramo aggregativo e il rifiuto dichiarato.
+"""Dal router al ``RagResult``: il ramo aggregativo, il rifiuto dichiarato, la meta-domanda.
 
-Nessuna chiamata al modello in tutto il file. ``usage`` resta vuoto per costruzione: se
-comparissero token, il confronto A/B del caching starebbe misurando una chiamata che non
-esiste.
+Sui rami **calcolati** (`serve_structured`, `serve_uncovered`) non c'è nessuna chiamata al
+modello e ``usage`` resta vuoto per costruzione: se comparissero token, il confronto A/B
+del caching starebbe misurando una chiamata che non esiste.
+
+`serve_meta` è l'eccezione dichiarata: il modello scrive la prosa, ma su passaggi che sono
+la scheda del corpus e un blocco di statistiche calcolate — nessun numero nasce lì. Il suo
+`usage` è reale e va contato, perché la chiamata c'è.
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ import logging
 from config import RagConfig
 from rag import router
 from rag.corpus_card import CorpusCard
-from rag.generation import RagResult
+from rag.generation import Passage, RagResult
 from rag.outcomes import StructuredOutcome
 from structured import intents
 from structured.answer import componi
@@ -118,42 +122,42 @@ def serve_uncovered(cfg: RagConfig, query: str, rotta: router.Route) -> RagResul
     )
 
 
-def serve_meta(
-    cfg: RagConfig,
-    store: StructuredStore | None,
-    card: CorpusCard | None,
-    query: str,
-    rotta: router.Route,
-) -> RagResult:
-    """Meta-domanda sulla collezione: scheda scritta a mano + perimetro calcolato.
+def _passaggi_meta(
+    store: StructuredStore | None, card: CorpusCard | None
+) -> tuple[list[Passage], StructuredOutcome | None]:
+    """I «passaggi» del ramo meta: una sezione della scheda per passaggio, più il blocco
+    delle statistiche calcolate. Stessa forma dei passaggi del retrieval, così la
+    generazione, la verifica delle citazioni e la guardia verbatim funzionano identiche.
 
-    Template, mai il modello — come ogni risposta di questo file. Il chiamante garantisce
-    che almeno uno fra ``store`` e ``card`` esista: con entrambi assenti la route degrada
-    a POINTWISE in pipeline, non arriva qui.
+    Le statistiche entrano come **passaggio a sé**: se il modello scrive una cifra, quella
+    cifra deve stare qui o nella scheda, o la guardia verbatim la segna non verificata.
+    Il numero resta calcolato — il modello lo può copiare, non inventare.
     """
-    blocchi: list[str] = []
+    passaggi: list[Passage] = []
     if card is not None:
-        blocchi.append(card.text)
-    else:
-        # Senza scheda restano i soli numeri: si dice cosa manca invece di improvvisare
-        # un contesto che nessuno ha scritto.
-        blocchi.append(
-            "Per questo corpus non è stata compilata una scheda descrittiva: posso "
-            "dichiararne solo il perimetro indicizzato."
-        )
+        for n, (nome, testo) in enumerate(card.sections, start=1):
+            passaggi.append(
+                Passage(
+                    n=n,
+                    chunk_id=f"scheda::{nome}",
+                    source=f"scheda del corpus — {nome}",
+                    content=testo,
+                )
+            )
 
     esito = None
     if store is not None:
         rows = store.query(_SQL_STATS, [])
         totale = sum(int(r["n"]) for r in rows)
-        righe = [
-            f"- {r['comitato']}: {r['n']} delibere, anni {r['anno_min']}–{r['anno_max']}" for r in rows
-        ]
-        blocchi.append(
-            "**Perimetro indicizzato** — "
-            f"{totale} delibere interrogabili, così distribuite:\n" + "\n".join(righe) + "\n\n"
-            "Questi numeri sono calcolati sui metadati del corpus indicizzato, non "
-            "dichiarati nella scheda: l'archivio storico completo è più ampio."
+        righe = [f"- {r['comitato']}: {r['n']} delibere, anni {r['anno_min']}–{r['anno_max']}" for r in rows]
+        testo = (
+            f"Perimetro indicizzato: {totale} delibere interrogabili, così distribuite:\n"
+            + "\n".join(righe)
+            + "\nQuesti numeri sono calcolati sui metadati del corpus indicizzato; "
+            "l'archivio storico completo è più ampio."
+        )
+        passaggi.append(
+            Passage(n=len(passaggi) + 1, chunk_id="scheda::perimetro", source="perimetro calcolato", content=testo)
         )
         esito = StructuredOutcome(
             intent=_INTENT_CORPUS_STATS,
@@ -165,15 +169,59 @@ def serve_meta(
             completeness={},
             cited_doc_ids=[],
         )
+    return passaggi, esito
 
+
+def serve_meta(
+    cfg: RagConfig,
+    store: StructuredStore | None,
+    card: CorpusCard | None,
+    query: str,
+    rotta: router.Route,
+    generator=None,
+) -> RagResult:
+    """Meta-domanda sulla collezione: **risposta generata**, fondata sulla scheda.
+
+    La prima versione concatenava tutte le sezioni della scheda. Era un difetto, rilevato
+    giudicando: a «che periodo copre l'archivio?» rispondeva anche come sono fatte le
+    premesse e cosa il sistema sa calcolare. Chi chiede vuole una risposta di senso
+    compiuto; la sezione della scheda è la **fonte**, e come tale si cita — non si serve
+    al posto della risposta.
+
+    È l'unica eccezione alla regola «su questo ramo il modello non entra», e la ragione
+    è che qui non c'è nessun numero da proteggere: le cifre stanno nel passaggio del
+    perimetro, calcolate, e la guardia verbatim verifica che quelle scritte esistano. Il
+    modello scrive la prosa, non i fatti.
+
+    Senza generatore (o se la chiamata fallisce) si degrada alla concatenazione di prima:
+    una risposta prolissa è meglio di nessuna risposta.
+    """
+    passaggi, esito = _passaggi_meta(store, card)
     route_servita = router.META
+    base = _base(cfg, query, rotta, route_servita)
+
+    if generator is not None and passaggi:
+        try:
+            res = generator.genera_da_passaggi(query, passaggi, cache_key=f"meta:{cfg.mistral_model}")
+            res.route = route_servita
+            res.structured = esito
+            res.params = base["params"]
+            res.router_signals = rotta.signals
+            return res
+        except Exception as exc:  # una meta-domanda non deve fallire per un errore di rete
+            logger.warning("Generazione meta fallita (%s): degrado alla scheda integrale", exc.__class__.__name__)
+
+    testo = "\n\n".join(p.content for p in passaggi) or (
+        "Per questo corpus non è stata compilata una scheda descrittiva e non risulta un "
+        "corpus indicizzato: non posso descriverlo."
+    )
     return RagResult(
-        answer_text="\n\n".join(blocchi),
+        answer_text=testo,
         refused=False,
         refusal_reason=None,
         route=route_servita,
         structured=esito,
-        **_base(cfg, query, rotta, route_servita),
+        **base,
     )
 
 
