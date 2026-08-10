@@ -120,9 +120,19 @@ class FraseRicorrente:
 
 @dataclass(frozen=True)
 class IndiceFrasi:
-    """Le sole frasi che ricorrono sopra soglia, per impronta. Il resto non serve."""
+    """Le sole frasi che ricorrono sopra soglia, per impronta. Il resto non serve.
+
+    Accanto alle frasi c'è ``norme``: quante delibere nominano ciascuna norma in forma
+    piena. Sono due chiavi diverse per lo stesso fenomeno, e servono entrambe perché
+    falliscono in modi diversi. La frase è precisa ma **fragile alla coda**: «VISTA la legge
+    23 agosto 1988, n. 400, recante …» finisce in modo diverso da una delibera all'altra e
+    si spezza in due gruppi (111 e 74 documenti) invece di uno. La norma è **robusta**
+    perché ignora ciò che le sta attorno — 289 documenti per la legge del 1967, contati
+    senza incertezza — ma da sola non dice se il *fatto* affermato sia boilerplate.
+    """
 
     frasi: dict[str, FraseRicorrente]
+    norme: dict[str, int]
     n_documenti_corpus: int
     soglia: int
 
@@ -138,9 +148,13 @@ class IndiceFrasi:
                 trovate[r.impronta] = r
         return sorted(trovate.values(), key=lambda r: -r.n_documenti)
 
+    def norma_diffusa(self, etichetta: str) -> int:
+        """In quanti documenti compare la norma. 0 = sconosciuta o sotto soglia."""
+        return self.norme.get(etichetta, 0)
+
     @classmethod
     def vuoto(cls) -> IndiceFrasi:
-        return cls(frasi={}, n_documenti_corpus=0, soglia=0)
+        return cls(frasi={}, norme={}, n_documenti_corpus=0, soglia=0)
 
     def salva(self, path: str | Path) -> Path:
         p = Path(path)
@@ -150,6 +164,7 @@ class IndiceFrasi:
                 {
                     "n_documenti_corpus": self.n_documenti_corpus,
                     "soglia": self.soglia,
+                    "norme": dict(sorted(self.norme.items(), key=lambda kv: -kv[1])),
                     "frasi": [
                         {
                             "impronta": f.impronta,
@@ -188,7 +203,12 @@ class IndiceFrasi:
             )
             for f in d.get("frasi", [])
         }
-        return cls(frasi=frasi, n_documenti_corpus=d.get("n_documenti_corpus", 0), soglia=d.get("soglia", 0))
+        return cls(
+            frasi=frasi,
+            norme=d.get("norme") or {},
+            n_documenti_corpus=d.get("n_documenti_corpus", 0),
+            soglia=d.get("soglia", 0),
+        )
 
 
 def costruisci_indice(documenti: list[tuple[str, str]], soglia: int) -> IndiceFrasi:
@@ -201,9 +221,12 @@ def costruisci_indice(documenti: list[tuple[str, str]], soglia: int) -> IndiceFr
     from rag.norme import estrai_norme
 
     documenti_per_frase: dict[str, set[str]] = {}
+    documenti_per_norma: dict[str, set[str]] = {}
     occorrenze: dict[str, int] = {}
     esempio: dict[str, str] = {}
     for doc_id, testo in documenti:
+        for norma in estrai_norme(ricongiungi_sillabazione(testo)):
+            documenti_per_norma.setdefault(norma, set()).add(doc_id)
         for frase in dividi_in_frasi(testo):
             k = impronta(frase)
             documenti_per_frase.setdefault(k, set()).add(doc_id)
@@ -221,4 +244,10 @@ def costruisci_indice(documenti: list[tuple[str, str]], soglia: int) -> IndiceFr
         for k, docs in documenti_per_frase.items()
         if len(docs) >= soglia
     }
-    return IndiceFrasi(frasi=frasi, n_documenti_corpus=len({d for d, _ in documenti}), soglia=soglia)
+    norme = {n: len(docs) for n, docs in documenti_per_norma.items() if len(docs) >= soglia}
+    return IndiceFrasi(
+        frasi=frasi,
+        norme=norme,
+        n_documenti_corpus=len({d for d, _ in documenti}),
+        soglia=soglia,
+    )

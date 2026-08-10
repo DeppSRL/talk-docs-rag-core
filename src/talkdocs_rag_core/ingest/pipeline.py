@@ -200,6 +200,21 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
         TermStats.from_documents([c.content for c in flat_chunks]).save(cfg.term_df_path)
         print(f"[ingest] statistiche IDF → {cfg.term_df_path}")
 
+    # Indice delle frasi ricorrenti: il materiale della nota di provenienza. Si costruisce
+    # qui perché qui i testi interi sono già in memoria — e perché il conteggio che serve è
+    # per DOCUMENTO, che a valle, sui chunk, non sarebbe più ricostruibile.
+    if cfg.provenienza_enabled:
+        from ingest.frasi import costruisci_indice
+
+        indice = costruisci_indice(
+            [(d.source_id, d.content) for d in all_documents], soglia=cfg.frase_min_documenti
+        )
+        percorso = indice.salva(cfg.frasi_index_path)
+        print(
+            f"[ingest] frasi ricorrenti (≥{cfg.frase_min_documenti} documenti): "
+            f"{len(indice.frasi)} frasi, {len(indice.norme)} norme → {percorso}"
+        )
+
     # Versioning.
     corpus_content_hash = _sha256(
         "\n".join(f"{f['path']}:{f['content_hash']}" for f in sorted(manifest_files, key=lambda x: x["path"]))

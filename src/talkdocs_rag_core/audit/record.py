@@ -84,6 +84,10 @@ class AuditRecord:
     # corpus_version. È la citazione, non un dettaglio diagnostico.
     structured: dict | None = None
     verbatim: dict | None = None
+    # Le formule ricorrenti dichiarate nella risposta, con i conteggi. La nota è calcolata:
+    # la sua difendibilità sta qui, come per `structured` sul ramo aggregativo — sql e
+    # parametri là, frase e numero di documenti qui.
+    provenienza: dict | None = None
     uncertain_reason: str | None = None
 
 
@@ -153,6 +157,7 @@ class AuditWriter:
             router_llm=result.router_llm,
             structured=asdict(result.structured) if result.structured else None,
             verbatim=asdict(result.verbatim) if result.verbatim else None,
+            provenienza=result.provenienza,
             uncertain_reason=result.uncertain_reason,
         )
         with self.path.open("a", encoding="utf-8") as f:

@@ -190,6 +190,21 @@ class RagConfig:
     # errore visibile — si traveste da decisione di instradamento.
     router_llm_max_retries: int = 8
 
+    # --- Provenienza delle frasi ricorrenti ---
+    # Certi fatti non stanno in un documento: stanno in una formula che centinaia di
+    # delibere ricopiano (la legge istitutiva, la presidenza, una definizione). La
+    # citazione a una di esse è corretta e arbitraria insieme, e il giudizio umano l'ha
+    # segnalato tre volte. La nota lo dichiara con un numero calcolato.
+    #
+    # `frase_min_documenti` è la soglia con cui si COSTRUISCE l'indice in ingest: sotto,
+    # la frase non è boilerplate del corpus. `provenienza_min_quota` è la soglia con cui
+    # la nota SCATTA, espressa in quota del corpus perché è l'unica forma che si trasporta
+    # su un corpus di dimensione diversa — su 511 delibere il 5% fa 26.
+    provenienza_enabled: bool = True
+    frase_min_documenti: int = 10
+    provenienza_min_quota: float = 0.05
+    frasi_index_path: str = "corpus/frasi_ricorrenti.json"
+
     # --- Resilienza dell'eval ---
     # Il retry dell'SDK (`http_max_retries`) copre il 429 istantaneo, non il rate limit
     # *sostenuto*: i suoi backoff stanno nell'ordine dei secondi, e una finestra di quota
@@ -260,6 +275,10 @@ class RagConfig:
             router_llm_enabled=_get_bool("ROUTER_LLM_ENABLED", cls.router_llm_enabled),
             router_llm_max_tokens=_get_int("ROUTER_LLM_MAX_TOKENS", cls.router_llm_max_tokens),
             router_llm_max_retries=_get_int("ROUTER_LLM_MAX_RETRIES", cls.router_llm_max_retries),
+            provenienza_enabled=_get_bool("PROVENIENZA_ENABLED", cls.provenienza_enabled),
+            frase_min_documenti=_get_int("FRASE_MIN_DOCUMENTI", cls.frase_min_documenti),
+            provenienza_min_quota=_get_float("PROVENIENZA_MIN_QUOTA", cls.provenienza_min_quota),
+            frasi_index_path=_get("FRASI_INDEX_PATH", cls.frasi_index_path),
             eval_item_max_retries=_get_int("EVAL_ITEM_MAX_RETRIES", cls.eval_item_max_retries),
             eval_item_backoff_s=_get_float("EVAL_ITEM_BACKOFF_S", cls.eval_item_backoff_s),
             price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", cls.price_input_per_mtok),

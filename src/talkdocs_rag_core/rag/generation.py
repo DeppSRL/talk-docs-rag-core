@@ -138,6 +138,10 @@ class RagResult:
     router_llm: dict | None = None
     structured: StructuredOutcome | None = None
     verbatim: VerbatimOutcome | None = None
+    # Nota di provenienza (frasi ricorrenti): `None` = niente da dichiarare. Quando c'è,
+    # il testo della nota è GIÀ dentro `answer_text` — questo campo è ciò che serve a
+    # rifare il conto senza rigiocare la risposta, come `structured` sul ramo calcolato.
+    provenienza: dict | None = None
     # Motivo dell'astensione: "termini_mancanti" (guardiano IDF) | "verbatim".
     uncertain_reason: str | None = None
 

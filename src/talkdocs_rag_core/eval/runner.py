@@ -148,6 +148,14 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res, errore: str = "") 
         "verbatim_misattributed": vb.n_misattributed if vb else "",
         "verbatim_not_found": vb.n_not_found if vb else "",
         "uncertain_reason": getattr(res, "uncertain_reason", None) or "",
+        # Quante formule ricorrenti la risposta ha dichiarato, e quanto è diffusa la più
+        # diffusa. Sono il modo di vedere se la nota di provenienza scatta dove serve senza
+        # rileggere 33 risposte: `provenienza_max` alto su una domanda puntuale è rumore.
+        "provenienza_fonti": len((getattr(res, "provenienza", None) or {}).get("fonti", [])),
+        "provenienza_max_documenti": max(
+            (f["n_documenti"] for f in (getattr(res, "provenienza", None) or {}).get("fonti", [])),
+            default="",
+        ),
         "from_cache_semantic": int(res.from_cache and res.cache_kind == "semantic"),
         "prompt_tokens": usage.get("prompt_tokens", 0),
         "completion_tokens": usage.get("completion_tokens", 0),
@@ -201,9 +209,11 @@ def _verdict(res) -> str:
     u = res.usage or {}
     cached = u.get("cached_tokens", 0)
     tronca = "  ⚠TRONCATA" if res.truncated else ""
+    prov = getattr(res, "provenienza", None) or {}
+    nota = f"  prov={max(f['n_documenti'] for f in prov['fonti'])}doc" if prov.get("fonti") else ""
     return (
         f"risposta  tok={u.get('prompt_tokens', 0)}→{u.get('completion_tokens', 0)}"
-        f"  cached={cached}  cit={len(res.cited_chunk_ids)}{tronca}"
+        f"  cached={cached}  cit={len(res.cited_chunk_ids)}{nota}{tronca}"
     )
 
 
@@ -378,6 +388,7 @@ def _aggregate(cfg: RagConfig, rows: list[dict], condition: str) -> dict:
         "n_structured": sum(1 for r in sub if r["route"] == "structured"),
         "n_uncovered": sum(1 for r in sub if r["route"] == "uncovered"),
         "n_meta": sum(1 for r in sub if r["route"] == "meta"),
+        "n_provenienza": sum(1 for r in sub if r.get("provenienza_fonti")),
         # Domande che il provider non ha servito. Fuori da ogni denominatore di merito, ma
         # **dentro il report**: una metrica calcolata su 49 item quando l'eval set ne ha 55
         # è un'altra metrica, e chi legge deve poterlo vedere senza aprire il CSV.
@@ -508,6 +519,7 @@ def _markdown(
         f"| Risposte calcolate / rifiuti dichiarati | {agg_off['n_structured']} / {agg_off['n_uncovered']} "
         f"| {agg_on['n_structured']} / {agg_on['n_uncovered']} |",
         f"| Risposte meta (scheda del corpus) | {agg_off['n_meta']} | {agg_on['n_meta']} |",
+        f"| Risposte con nota di provenienza | {agg_off['n_provenienza']} | {agg_on['n_provenienza']} |",
         f"| Router agentico: chiamate / decisioni servite | {agg_off['router_llm_calls']} / "
         f"{agg_off['router_llm_decisions']} | {agg_on['router_llm_calls']} / {agg_on['router_llm_decisions']} |",
         f"| **Router agentico: classificazioni fallite** | {agg_off['router_llm_failed']} "

@@ -13,6 +13,8 @@ from pathlib import Path
 
 from cache.semantic import SemanticCache
 from config import REPO_ROOT, RagConfig
+from ingest.frasi import IndiceFrasi
+from rag import provenienza as prov_mod
 from rag import router
 from rag.agentic_router import AgenticRouter
 from rag.corpus_card import CorpusCard
@@ -58,6 +60,12 @@ class RagPipeline:
     # Router agentico. `None` = spento (`router_llm_enabled = False`, il default): la
     # cascata resta quella lessicale dell'incremento 1, byte-identica.
     agentic: AgenticRouter | None = None
+    # Indice delle frasi ricorrenti (nota di provenienza). Vuoto = nessuna nota: un corpus
+    # indicizzato prima di questo incremento continua a rispondere, senza dichiarazione.
+    frasi: IndiceFrasi | None = None
+
+    def _dichiara_provenienza(self, res: RagResult) -> None:
+        _dichiara_provenienza_impl(self.cfg, self.frasi, res)
 
     @staticmethod
     def _tag(res: RagResult, rotta: router.Route) -> RagResult:
@@ -154,6 +162,7 @@ class RagPipeline:
         cache_key = provider_cache_key if provider_cache_key is not None else self.corpus_version
         res = self.generator.generate(query, results, cache_key=cache_key)
         res.router_signals = rotta.signals
+        self._dichiara_provenienza(res)
         self._tag(res, rotta)
         # Gli orologi si fermano **prima** dello store in cache: scriverci dentro costa un
         # embedding e una write su Chroma, e finirebbe nella latenza servita — falsando
@@ -170,6 +179,42 @@ class RagPipeline:
                 claims=res.claims,
             )
         return res
+
+
+def _dichiara_provenienza_impl(cfg: RagConfig, frasi: IndiceFrasi | None, res) -> None:
+    """Aggiunge alla risposta la nota sulle formule ricorrenti, se ce ne sono.
+
+    Va **dopo** la generazione e prima dell'audit: la nota è calcolata, non generata, e
+    modifica il testo servito. Due conseguenze da tenere in conto e non da nascondere: la
+    nota entra nella risposta che finisce in cache semantica (giusto — è parte della
+    risposta), e cambia l'impronta che governa l'ereditarietà dei giudizi umani, quindi la
+    prima run dopo questo incremento fa rileggere gli item toccati.
+    """
+    if not cfg.provenienza_enabled or frasi is None or res.refused or res.uncertain:
+        return
+    if not res.passages or not res.claims:
+        return
+    minimo = max(cfg.frase_min_documenti, round(cfg.provenienza_min_quota * frasi.n_documenti_corpus))
+    prov = prov_mod.calcola(
+        res.claims, {p.n: p.content for p in res.passages}, frasi, min_documenti=minimo
+    )
+    if prov.vuota:
+        return
+    res.answer_text = prov_mod.applica(res.answer_text, prov)
+    res.provenienza = {
+        "soglia": prov.soglia,
+        "n_documenti_corpus": prov.n_documenti_corpus,
+        "fonti": [
+            {
+                "chiave": f.chiave,
+                "n_documenti": f.n_documenti,
+                "norme": list(f.norme),
+                "passaggi": list(f.passaggi),
+                "testo": f.testo,
+            }
+            for f in prov.fonti
+        ],
+    }
 
 
 async def build_pipeline(cfg: RagConfig) -> RagPipeline:
@@ -217,4 +262,5 @@ async def build_pipeline(cfg: RagConfig) -> RagPipeline:
         store=store,
         card=card,
         agentic=agentic,
+        frasi=IndiceFrasi.carica(cfg.frasi_index_path) if cfg.provenienza_enabled else None,
     )
