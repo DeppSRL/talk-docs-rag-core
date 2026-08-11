@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from cache.meta import CacheMeta, impronta_scheda
 from cache.semantic import SemanticCache
 from config import REPO_ROOT, RagConfig
 from ingest.frasi import IndiceFrasi
@@ -63,6 +64,9 @@ class RagPipeline:
     # Indice delle frasi ricorrenti (nota di provenienza). Vuoto = nessuna nota: un corpus
     # indicizzato prima di questo incremento continua a rispondere, senza dichiarazione.
     frasi: IndiceFrasi | None = None
+    # Cache persistente delle risposte meta. `None` = spenta: prosa nuova a ogni run, e
+    # sei giudizi umani da rileggere ogni volta.
+    meta_cache: CacheMeta | None = None
 
     def _dichiara_provenienza(self, res: RagResult) -> None:
         _dichiara_provenienza_impl(self.cfg, self.frasi, res)
@@ -110,7 +114,8 @@ class RagPipeline:
             if rotta.route == router.META:
                 if self.card is not None or self.store is not None:
                     servita = serve_meta(
-                        self.cfg, self.store, self.card, query, rotta, generator=self.generator
+                        self.cfg, self.store, self.card, query, rotta,
+                        generator=self.generator, cache=self.meta_cache,
                     )
                     return _finish(self._tag(servita, rotta), t0, w0)
                 # Come per il ramo aggregativo senza manifest: si degrada contando, non in silenzio.
@@ -179,6 +184,28 @@ class RagPipeline:
                 claims=res.claims,
             )
         return res
+
+
+def _apri_cache_meta(cfg: RagConfig, card: CorpusCard | None, corpus_version: str) -> CacheMeta | None:
+    """Cache meta, con la scheda **dentro la chiave**.
+
+    La scheda vive in `corpus/delibere/card/` ma è esclusa dall'ingest, quindi
+    `corpus_version` non la copre: senza la sua impronta, correggere la scheda — che è
+    esattamente il lavoro di setup di un corpus — lascerebbe in circolo risposte meta che
+    descrivono la scheda di ieri.
+    """
+    if not cfg.meta_cache_enabled:
+        return None
+    cache = CacheMeta(
+        cfg.meta_cache_path,
+        corpus_version=corpus_version,
+        card_hash=impronta_scheda(card),
+        model=cfg.mistral_model,
+    )
+    tolte = cache.pulisci_obsolete()
+    if tolte:
+        logger.info("cache meta: %d voci obsolete rimosse (corpus, scheda o modello cambiati)", tolte)
+    return cache
 
 
 def _dichiara_provenienza_impl(cfg: RagConfig, frasi: IndiceFrasi | None, res) -> None:
@@ -263,4 +290,5 @@ async def build_pipeline(cfg: RagConfig) -> RagPipeline:
         card=card,
         agentic=agentic,
         frasi=IndiceFrasi.carica(cfg.frasi_index_path) if cfg.provenienza_enabled else None,
+        meta_cache=_apri_cache_meta(cfg, card, corpus_version),
     )

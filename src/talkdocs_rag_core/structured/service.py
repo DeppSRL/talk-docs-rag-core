@@ -179,6 +179,45 @@ def _passaggi_meta(
     return passaggi, esito
 
 
+def _da_cache(cfg, query, rotta, passaggi, esito, voce, base) -> RagResult:
+    """Risposta meta servita dalla cache persistente.
+
+    I passaggi sono **ricostruiti adesso** (scheda + statistiche appena calcolate), non
+    ripresi dalla voce: se il corpus fosse cambiato la chiave non combacerebbe, ma i
+    passaggi restano la cosa che si mostra a chi giudica, e devono essere quelli veri di
+    questa run — non una copia congelata che nessuno ha più confrontato con l'indice.
+
+    La guardia verbatim si **ricalcola** sugli stessi claim: è deterministica e non costa
+    nulla, e un esito ripreso dal file sarebbe un numero di cui nessuno ha più verificato
+    il presupposto.
+    """
+    from rag.verbatim import verifica
+
+    esito_verbatim = None
+    if cfg.verbatim_enabled and voce.claims:
+        esito_verbatim = verifica(voce.claims, passaggi, cfg.verbatim_min_chars)
+    return RagResult(
+        answer_text=voce.answer_text,
+        refused=False,
+        refusal_reason=None,
+        route=router.META,
+        structured=esito,
+        verbatim=esito_verbatim,
+        from_cache=True,
+        # Non è la cache semantica e non va confusa con quella nel report: è persistente,
+        # attiva in entrambi i bracci dell'A/B, e vale solo per il ramo meta.
+        cache_kind="meta",
+        **{
+            **base,
+            "claims": voce.claims,
+            "cited_passages": voce.cited_passages,
+            "cited_chunk_ids": voce.cited_chunk_ids,
+            "passages": passaggi,
+            "raw_output": voce.raw_output,
+        },
+    )
+
+
 def serve_meta(
     cfg: RagConfig,
     store: StructuredStore | None,
@@ -186,6 +225,7 @@ def serve_meta(
     query: str,
     rotta: router.Route,
     generator=None,
+    cache=None,
 ) -> RagResult:
     """Meta-domanda sulla collezione: **risposta generata**, fondata sulla scheda.
 
@@ -202,10 +242,20 @@ def serve_meta(
 
     Senza generatore (o se la chiamata fallisce) si degrada alla concatenazione di prima:
     una risposta prolissa è meglio di nessuna risposta.
+
+    ``cache`` (opzionale) congela la prosa: a parità di corpus, scheda e modello la
+    risposta è la stessa a ogni run. Vedi ``cache/meta.py`` per il perché — in breve:
+    questo ramo non dipende dal retrieval, quindi la variazione fra due run è rumore del
+    decoder, e pagarla significa rileggere sei giudizi umani per sempre.
     """
     passaggi, esito = _passaggi_meta(store, card)
     route_servita = router.META
     base = _base(cfg, query, rotta, route_servita)
+
+    if cache is not None and passaggi:
+        voce = cache.leggi(query)
+        if voce is not None:
+            return _da_cache(cfg, query, rotta, passaggi, esito, voce, base)
 
     if generator is not None and passaggi:
         try:
@@ -214,6 +264,21 @@ def serve_meta(
             res.structured = esito
             res.params = base["params"]
             res.router_signals = rotta.signals
+            if cache is not None:
+                from cache.meta import VoceMeta
+
+                cache.scrivi(
+                    query,
+                    VoceMeta(
+                        answer_text=res.answer_text,
+                        claims=res.claims,
+                        cited_passages=res.cited_passages,
+                        cited_chunk_ids=res.cited_chunk_ids,
+                        raw_output=res.raw_output,
+                        query=query,
+                        model=cfg.mistral_model,
+                    ),
+                )
             return res
         except Exception as exc:  # una meta-domanda non deve fallire per un errore di rete
             logger.warning("Generazione meta fallita (%s): degrado alla scheda integrale", exc.__class__.__name__)

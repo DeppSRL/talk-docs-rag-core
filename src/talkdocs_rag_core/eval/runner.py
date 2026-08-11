@@ -157,6 +157,9 @@ def _row(cfg: RagConfig, item: EvalItem, condition: str, res, errore: str = "") 
             default="",
         ),
         "from_cache_semantic": int(res.from_cache and res.cache_kind == "semantic"),
+        # La cache meta è persistente e attiva in ENTRAMBI i bracci: contarla come hit
+        # semantica gonfierebbe il risparmio attribuito alla cache, che è il deliverable.
+        "from_cache_meta": int(res.from_cache and res.cache_kind == "meta"),
         "prompt_tokens": usage.get("prompt_tokens", 0),
         "completion_tokens": usage.get("completion_tokens", 0),
         "cached_tokens": usage.get("cached_tokens", 0),
@@ -187,6 +190,8 @@ def _verdict(res) -> str:
     # riga di progresso l'assenza è il default lessicale, non un'informazione persa.
     llm_tag = "  ·router-llm" if getattr(res, "router_source", "lexical") == "llm" else ""
     if getattr(res, "route", "pointwise") == "meta":
+        if res.from_cache and res.cache_kind == "meta":
+            return f"META (dalla cache persistente, 0 chiamate){llm_tag}"
         s = getattr(res, "structured", None)
         stats = f"scheda + {s.computed_value} delibere" if s is not None else "scheda, senza statistiche"
         # La risposta meta è generata: dire «0 chiamate» sarebbe falso. Quando invece la
@@ -389,6 +394,7 @@ def _aggregate(cfg: RagConfig, rows: list[dict], condition: str) -> dict:
         "n_uncovered": sum(1 for r in sub if r["route"] == "uncovered"),
         "n_meta": sum(1 for r in sub if r["route"] == "meta"),
         "n_provenienza": sum(1 for r in sub if r.get("provenienza_fonti")),
+        "n_cache_meta": sum(r.get("from_cache_meta", 0) for r in sub),
         # Domande che il provider non ha servito. Fuori da ogni denominatore di merito, ma
         # **dentro il report**: una metrica calcolata su 49 item quando l'eval set ne ha 55
         # è un'altra metrica, e chi legge deve poterlo vedere senza aprire il CSV.
@@ -520,6 +526,7 @@ def _markdown(
         f"| {agg_on['n_structured']} / {agg_on['n_uncovered']} |",
         f"| Risposte meta (scheda del corpus) | {agg_off['n_meta']} | {agg_on['n_meta']} |",
         f"| Risposte con nota di provenienza | {agg_off['n_provenienza']} | {agg_on['n_provenienza']} |",
+        f"| Risposte meta dalla cache persistente | {agg_off['n_cache_meta']} | {agg_on['n_cache_meta']} |",
         f"| Router agentico: chiamate / decisioni servite | {agg_off['router_llm_calls']} / "
         f"{agg_off['router_llm_decisions']} | {agg_on['router_llm_calls']} / {agg_on['router_llm_decisions']} |",
         f"| **Router agentico: classificazioni fallite** | {agg_off['router_llm_failed']} "
@@ -534,6 +541,12 @@ def _markdown(
         "> Il costo del router agentico è **separato** dalla colonna `Costo stimato` (che resta",
         "> costo di generazione): sommarli è legittimo, confonderli no — sul ramo strutturato",
         "> «usage vuoto per costruzione» resta vero anche col classificatore acceso.",
+        ">",
+        "> **La cache delle risposte meta non è la cache semantica** e non entra nell'A/B: è",
+        "> persistente fra le run e attiva in entrambi i bracci, come il ramo calcolato. Toglie",
+        "> chiamate al modello in OFF e in ON allo stesso modo, quindi il confronto resta onesto,",
+        "> ma il conteggio delle chiamate non è comparabile con le run precedenti alla sua",
+        "> introduzione.",
         ">",
         "> **`classificazioni fallite` > 0 contamina il richiamo del router.** Una chiamata morta",
         "> (429, timeout, proposta non conforme) ricade sul lessicale e serve comunque una route:",

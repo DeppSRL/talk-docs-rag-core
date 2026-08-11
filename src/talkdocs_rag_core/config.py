@@ -190,6 +190,15 @@ class RagConfig:
     # errore visibile — si traveste da decisione di instradamento.
     router_llm_max_retries: int = 8
 
+    # --- Cache persistente delle risposte meta ---
+    # Il ramo meta non dipende dal retrieval: a parità di corpus, scheda e modello la
+    # risposta dovrebbe essere la stessa, e la variazione fra due run è rumore del decoder.
+    # Misurato: `meta` 6/6 e 5/6 risposte cambiate fra run consecutive, contro 1/7 del ramo
+    # `structured` che è a template — e ogni cambio costa una rilettura del giudizio umano.
+    # Spegnendola si torna al comportamento precedente (prosa nuova a ogni run).
+    meta_cache_enabled: bool = True
+    meta_cache_path: str = "corpus/risposte_meta.json"
+
     # --- Provenienza delle frasi ricorrenti ---
     # Certi fatti non stanno in un documento: stanno in una formula che centinaia di
     # delibere ricopiano (la legge istitutiva, la presidenza, una definizione). La
@@ -275,6 +284,8 @@ class RagConfig:
             router_llm_enabled=_get_bool("ROUTER_LLM_ENABLED", cls.router_llm_enabled),
             router_llm_max_tokens=_get_int("ROUTER_LLM_MAX_TOKENS", cls.router_llm_max_tokens),
             router_llm_max_retries=_get_int("ROUTER_LLM_MAX_RETRIES", cls.router_llm_max_retries),
+            meta_cache_enabled=_get_bool("META_CACHE_ENABLED", cls.meta_cache_enabled),
+            meta_cache_path=_get("META_CACHE_PATH", cls.meta_cache_path),
             provenienza_enabled=_get_bool("PROVENIENZA_ENABLED", cls.provenienza_enabled),
             frase_min_documenti=_get_int("FRASE_MIN_DOCUMENTI", cls.frase_min_documenti),
             provenienza_min_quota=_get_float("PROVENIENZA_MIN_QUOTA", cls.provenienza_min_quota),
