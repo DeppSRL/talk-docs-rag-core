@@ -1,0 +1,35 @@
+# Vale nel repository estratto (dove questo file finisce alla radice) e in questa
+# sottocartella del banco. Sta qui e non solo nel `.gitignore` del PoC perché
+# l'estrazione porta con sé il pacchetto: un repository nuovo senza ignore è un
+# repository in cui il primo `git add -A` committa `.venv/`.
+
+# --- Stato rigenerabile: indici e artefatti di run ---
+chroma_db/
+chroma_data/
+data/
+logs/
+*.whoosh
+
+# --- Segreti ---
+.env
+.env.*
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# --- Tooling ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# --- OS / IDE ---
+.DS_Store
+.idea/
+.vscode/

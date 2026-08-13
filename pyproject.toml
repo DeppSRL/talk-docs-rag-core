@@ -22,6 +22,17 @@ dependencies = [
 # dell'applicazione, non della libreria. `RagConfig.from_env()` legge l'ambiente; chi vuole
 # un `.env` lo carica prima, come fa il PoC.
 
+# Servono al pacchetto quando è un repository per conto suo: là `uv sync --group dev` e
+# `uv run pytest` devono bastare, senza che nessuno ricordi di aggiungerli a mano.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
