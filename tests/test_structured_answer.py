@@ -7,9 +7,8 @@ ed è la differenza fra un numero e un numero difendibile.
 """
 
 import pytest
-
-from structured import intents
-from structured.answer import componi
+from talkdocs_rag_core.structured import intents
+from talkdocs_rag_core.structured.answer import componi
 
 
 def test_count_dichiara_il_perimetro_e_la_provenienza_del_numero():

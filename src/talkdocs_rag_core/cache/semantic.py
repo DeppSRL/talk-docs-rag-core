@@ -20,8 +20,8 @@ from dataclasses import dataclass
 
 import chromadb
 
-from config import RagConfig
-from vendor.talkdocs.services.embeddings import EmbeddingService
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.retrieval.services.embeddings import EmbeddingService
 
 
 @dataclass

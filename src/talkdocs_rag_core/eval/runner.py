@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from config import RagConfig
+from talkdocs_rag_core.config import RagConfig
 
 # I giudizi umani NON stanno qui. Il CSV del report è **rigenerato a ogni run**: colonne di
 # giudizio vuote in un file rigenerabile sono una trappola (si compilano e alla run dopo
@@ -229,7 +229,7 @@ def _risultato_errore(cfg: RagConfig, query: str, errore: str) -> object:
     *decisione* del sistema, questo è un buco) e le colonne di giudizio le azzera `_row`.
     Serve solo a tenere la riga nel CSV con le stesse chiavi delle altre.
     """
-    from rag.generation import RagResult
+    from talkdocs_rag_core.rag.generation import RagResult
 
     return RagResult(
         query=query,
@@ -583,8 +583,8 @@ def _markdown(
 
 
 async def run_eval(cfg: RagConfig, eval_set_path: str, out_dir: str) -> dict:
-    from app.pipeline import build_pipeline
-    from audit.record import AuditWriter
+    from talkdocs_rag_core.audit.record import AuditWriter
+    from talkdocs_rag_core.pipeline import build_pipeline
 
     items = _load_set(Path(eval_set_path))
     pipeline = await build_pipeline(cfg)

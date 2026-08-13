@@ -4,7 +4,7 @@ Il contratto che conta è il degrado: una directory assente o vuota deve dare ``
 (la pipeline serve senza scheda), non un'eccezione a costruzione della pipeline.
 """
 
-from rag.corpus_card import CorpusCard
+from talkdocs_rag_core.rag.corpus_card import CorpusCard
 
 
 def _scrivi(tmp_path, nome, testo):

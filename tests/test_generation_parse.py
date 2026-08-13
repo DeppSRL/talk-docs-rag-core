@@ -10,7 +10,7 @@ automatiche registravano «5 citazioni valide, 0 invalide» su un output inutili
 
 import json
 
-from rag.generation import _salvage_answer
+from talkdocs_rag_core.rag.generation import _salvage_answer
 
 
 def test_json_valido_non_passa_dal_recupero():

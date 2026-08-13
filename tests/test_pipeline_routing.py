@@ -9,9 +9,9 @@ credibilissimo.
 import asyncio
 import logging
 
-from app.pipeline import RagPipeline
-from config import RagConfig
-from structured.store import StructuredStore
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.pipeline import RagPipeline
+from talkdocs_rag_core.structured.store import StructuredStore
 
 MANIFEST = {
     "files": [
@@ -49,7 +49,7 @@ class GeneratorFinto:
         self.chiamate = 0
 
     def generate(self, query, results, cache_key):
-        from rag.generation import RagResult
+        from talkdocs_rag_core.rag.generation import RagResult
 
         self.chiamate += 1
         return RagResult(
@@ -120,7 +120,7 @@ def test_router_spento_riporta_la_pipeline_a_prima():
 def test_il_ramo_meta_non_tocca_la_cache_ne_il_retrieval():
     """La risposta meta è deterministica e dipende dal corpus_version come quella
     strutturata: cacharla o farla passare dal retrieval sarebbe lo stesso guasto."""
-    from rag.corpus_card import CorpusCard
+    from talkdocs_rag_core.rag.corpus_card import CorpusCard
 
     p, cache, hybrid, gen = _pipeline()
     p.card = CorpusCard(sections=(("00-contesto", "Delibere CIPE/CIPESS, atti pubblici."),))
@@ -136,7 +136,7 @@ def test_meta_senza_scheda_ne_store_degrada_a_puntuale(caplog):
     p, cache, hybrid, gen = _pipeline()
     p.card = None
     p.store = None
-    with caplog.at_level(logging.WARNING, logger="app.pipeline"):
+    with caplog.at_level(logging.WARNING, logger="talkdocs_rag_core.pipeline"):
         res = asyncio.run(p.ask("Di cosa parla questo corpus?", use_cache=True))
     assert res.route == "pointwise"
     assert hybrid.searches == 1 and gen.chiamate == 1
@@ -151,7 +151,7 @@ class AgenticFinto:
         self.consultato = 0
 
     def classify(self, query, lessicale):
-        from rag import router as r
+        from talkdocs_rag_core.rag import router as r
 
         self.consultato += 1
         return r.Route(self._route, intent=self._intent, params=self._params,
@@ -189,7 +189,7 @@ def test_senza_store_il_router_non_instrada(caplog):
     """Nessun manifest = nessuna tabella: si torna alla pipeline di sempre invece di esplodere."""
     p, cache, hybrid, gen = _pipeline()
     p.store = None
-    with caplog.at_level(logging.WARNING, logger="app.pipeline"):
+    with caplog.at_level(logging.WARNING, logger="talkdocs_rag_core.pipeline"):
         res = asyncio.run(p.ask("Quante delibere ha adottato il CIPESS nel 2024?", use_cache=True))
     assert res.route == "pointwise"
     # Il gemello puntuale verifica che il ramo sia stato *eseguito*: qui vale lo stesso, o

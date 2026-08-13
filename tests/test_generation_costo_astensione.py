@@ -10,10 +10,10 @@ come chiamate al modello, già misurato su `eval-20260805T061415Z`.
 
 import json
 
-from config import RagConfig
-from rag.generation import MistralGenerator
-from rag.guard import TermStats
-from vendor.talkdocs.services.hybrid_search import HybridSearchResult
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.rag.generation import MistralGenerator
+from talkdocs_rag_core.rag.guard import TermStats
+from talkdocs_rag_core.retrieval.services.hybrid_search import HybridSearchResult
 
 TESTO = (
     "Il Comitato assegna in via programmatica la somma di euro 295.178.000 a valere "

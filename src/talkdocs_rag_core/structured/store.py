@@ -16,7 +16,7 @@ from pathlib import Path
 
 import duckdb
 
-from ingest.parsers import metadati_delibera
+from talkdocs_rag_core.ingest.parsers import metadati_delibera
 
 DDL = """
 CREATE TABLE documenti (

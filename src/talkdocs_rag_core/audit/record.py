@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rag.generation import RagResult
+from talkdocs_rag_core.rag.generation import RagResult
 
 
 @dataclass

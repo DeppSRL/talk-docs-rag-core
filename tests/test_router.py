@@ -13,9 +13,8 @@ crede di averli risolti senza misurarli.
 """
 
 import pytest
-
-from rag import router
-from structured import intents
+from talkdocs_rag_core.rag import router
+from talkdocs_rag_core.structured import intents
 
 
 @pytest.mark.parametrize(

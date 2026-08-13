@@ -7,12 +7,12 @@ corpus, la scheda o il modello (altrimenti si serve la descrizione di un archivi
 c'è più — il guasto peggiore proprio nel componente nato per dichiarare i limiti).
 """
 
-from cache.meta import CacheMeta, VoceMeta, impronta_scheda
-from config import RagConfig
-from rag import router
-from rag.corpus_card import CorpusCard
-from structured.service import serve_meta
-from structured.store import StructuredStore
+from talkdocs_rag_core.cache.meta import CacheMeta, VoceMeta, impronta_scheda
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.rag import router
+from talkdocs_rag_core.rag.corpus_card import CorpusCard
+from talkdocs_rag_core.structured.service import serve_meta
+from talkdocs_rag_core.structured.store import StructuredStore
 
 CARD = CorpusCard(sections=(("00-contesto", "Le delibere CIPE/CIPESS sono atti pubblici."),))
 ALTRA_CARD = CorpusCard(sections=(("00-contesto", "Le delibere CIPE/CIPESS sono atti amministrativi."),))
@@ -90,7 +90,7 @@ class _GeneratoreContato:
         self.chiamate = 0
 
     def genera_da_passaggi(self, query, passages, cache_key, **kw):
-        from rag.generation import RagResult
+        from talkdocs_rag_core.rag.generation import RagResult
 
         self.chiamate += 1
         return RagResult(

@@ -29,7 +29,7 @@ import json
 import textwrap
 from pathlib import Path
 
-from config import RagConfig
+from talkdocs_rag_core.config import RagConfig
 
 # Colonne che l'umano compila. Fedeltà è BINARIA: «l'affermazione è nel passaggio citato»
 # è sì o no, e il criterio di decisione ha bisogno di un tasso, quindi di un binario.
@@ -40,7 +40,7 @@ from config import RagConfig
 COLONNE_GIUDIZIO = ["fedele", "causa", "citazione_corretta", "italiano_1_5", "note"]
 # `ereditato_da` NON è una colonna di giudizio: non la compila l'umano, la scrive il
 # sistema quando riporta avanti un giudizio dato su una run precedente per una risposta
-# **identica** (vedi `app.judge`). Serve a rendere visibile la differenza fra un tasso di
+# **identica** (vedi `talkdocs_rag_core.eval.judge`). Serve a rendere visibile la differenza fra un tasso di
 # fedeltà appena misurato e uno per la maggior parte ereditato: sono due affermazioni
 # diverse, e senza questa colonna la seconda si spaccerebbe per la prima.
 COLONNE_FORM = [
@@ -76,7 +76,7 @@ def _fetch_chunks(cfg: RagConfig, chunk_ids: list[str]) -> dict[str, dict]:
     """Testo + metadati dei chunk citati, per id. Il chunk_id È l'id del record Chroma."""
     if not chunk_ids:
         return {}
-    from app.wiring import build_chroma_client
+    from talkdocs_rag_core.wiring import build_chroma_client
 
     client = build_chroma_client(cfg)
     col = client.get_or_create_collection(cfg.chroma_collection_retrieval)

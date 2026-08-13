@@ -12,9 +12,8 @@ import shutil
 from pathlib import Path
 
 import pytest
-
-from app import judge
-from scripts.spot_check import COLONNE_FORM
+from talkdocs_rag_core.eval import judge
+from talkdocs_rag_core.eval.spot_check import COLONNE_FORM
 
 
 def _rec(query, ident_noto=True, **kw):

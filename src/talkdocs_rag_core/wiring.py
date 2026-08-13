@@ -10,13 +10,13 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 from openai import OpenAI
 
-from config import RagConfig
-from rag.guard import TermStats
-from vendor.talkdocs.services.embeddings import EmbeddingService
-from vendor.talkdocs.services.hybrid_search import HybridSearchConfig, HybridSearchService
-from vendor.talkdocs.services.mistral_client import create_mistral_client
-from vendor.talkdocs.vector_stores.chroma import ChromaVectorStore
-from vendor.talkdocs.vector_stores.whoosh_index import WhooshKeywordIndex
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.rag.guard import TermStats
+from talkdocs_rag_core.retrieval.services.embeddings import EmbeddingService
+from talkdocs_rag_core.retrieval.services.hybrid_search import HybridSearchConfig, HybridSearchService
+from talkdocs_rag_core.retrieval.services.mistral_client import create_mistral_client
+from talkdocs_rag_core.retrieval.vector_stores.chroma import ChromaVectorStore
+from talkdocs_rag_core.retrieval.vector_stores.whoosh_index import WhooshKeywordIndex
 
 
 def build_client(cfg: RagConfig) -> OpenAI:

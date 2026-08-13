@@ -24,6 +24,16 @@ class EmbeddingService:
         self.client = client
         self.model = model
         self.dimension = dimension
+        # Usage cumulato delle chiamate di embedding.
+        #
+        # Prima non veniva catturato affatto: `response.usage` si buttava, e il costo di
+        # indicizzare un corpus si poteva leggere solo nella console del fornitore. Con
+        # l'obiettivo «quotare in fretta con costi certi» è portante — senza, il costo di
+        # indicizzare un corpus nuovo si stima a occhio invece di misurarlo.
+        #
+        # Accumulato qui e non restituito, per non cambiare la firma di `get_embeddings`:
+        # ogni chiamante resta valido, e chi vuole il numero lo legge.
+        self.usage: dict[str, int] = {"calls": 0, "prompt_tokens": 0, "total_tokens": 0}
 
     async def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings for a list of texts."""
@@ -44,6 +54,14 @@ class EmbeddingService:
 
         try:
             response = self.client.embeddings.create(model=self.model, input=non_empty_texts)
+
+            # `usage` è opzionale nella risposta: assente → si conta la chiamata e non i
+            # token, invece di far fallire un ingest per una metrica.
+            self.usage["calls"] += 1
+            u = getattr(response, "usage", None)
+            if u is not None:
+                self.usage["prompt_tokens"] += int(getattr(u, "prompt_tokens", 0) or 0)
+                self.usage["total_tokens"] += int(getattr(u, "total_tokens", 0) or 0)
 
             # Create result list with proper ordering
             embeddings = [[0.0] * self.dimension] * len(texts)

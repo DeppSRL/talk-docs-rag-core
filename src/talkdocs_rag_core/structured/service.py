@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import logging
 
-from config import RagConfig
-from rag import router
-from rag.corpus_card import CorpusCard
-from rag.generation import Passage, RagResult
-from rag.outcomes import StructuredOutcome
-from structured import intents
-from structured.answer import componi
-from structured.store import StructuredStore
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.rag import router
+from talkdocs_rag_core.rag.corpus_card import CorpusCard
+from talkdocs_rag_core.rag.generation import Passage, RagResult
+from talkdocs_rag_core.rag.outcomes import StructuredOutcome
+from talkdocs_rag_core.structured import intents
+from talkdocs_rag_core.structured.answer import componi
+from talkdocs_rag_core.structured.store import StructuredStore
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +191,7 @@ def _da_cache(cfg, query, rotta, passaggi, esito, voce, base) -> RagResult:
     nulla, e un esito ripreso dal file sarebbe un numero di cui nessuno ha più verificato
     il presupposto.
     """
-    from rag.verbatim import verifica
+    from talkdocs_rag_core.rag.verbatim import verifica
 
     esito_verbatim = None
     if cfg.verbatim_enabled and voce.claims:
@@ -265,7 +265,7 @@ def serve_meta(
             res.params = base["params"]
             res.router_signals = rotta.signals
             if cache is not None:
-                from cache.meta import VoceMeta
+                from talkdocs_rag_core.cache.meta import VoceMeta
 
                 cache.scrivi(
                     query,

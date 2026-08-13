@@ -218,7 +218,7 @@ def costruisci_indice(documenti: list[tuple[str, str]], soglia: int) -> IndiceFr
     ripetuta tre volte nella stessa delibera non è boilerplate del corpus, è la struttura di
     quel documento. È la differenza fra «lo dicono in 289» e «lo dice una, tre volte».
     """
-    from rag.norme import estrai_norme
+    from talkdocs_rag_core.rag.norme import estrai_norme
 
     documenti_per_frase: dict[str, set[str]] = {}
     documenti_per_norma: dict[str, set[str]] = {}

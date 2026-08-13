@@ -11,17 +11,17 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from cache.meta import CacheMeta, impronta_scheda
-from cache.semantic import SemanticCache
-from config import REPO_ROOT, RagConfig
-from ingest.frasi import IndiceFrasi
-from rag import provenienza as prov_mod
-from rag import router
-from rag.agentic_router import AgenticRouter
-from rag.corpus_card import CorpusCard
-from rag.generation import MistralGenerator, RagResult
-from structured.service import serve_meta, serve_structured, serve_uncovered
-from structured.store import StructuredStore
+from talkdocs_rag_core.cache.meta import CacheMeta, impronta_scheda
+from talkdocs_rag_core.cache.semantic import SemanticCache
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.ingest.frasi import IndiceFrasi
+from talkdocs_rag_core.rag import provenienza as prov_mod
+from talkdocs_rag_core.rag import router
+from talkdocs_rag_core.rag.agentic_router import AgenticRouter
+from talkdocs_rag_core.rag.corpus_card import CorpusCard
+from talkdocs_rag_core.rag.generation import MistralGenerator, RagResult
+from talkdocs_rag_core.structured.service import serve_meta, serve_structured, serve_uncovered
+from talkdocs_rag_core.structured.store import StructuredStore
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +35,9 @@ def _finish(res: RagResult, t0: float, w0: float) -> RagResult:
     return res
 
 
-def load_corpus_version(corpus_dir: Path | None = None) -> str:
-    corpus_dir = corpus_dir or (REPO_ROOT / "corpus")
+def load_corpus_version(corpus_dir: Path | str | None = None) -> str:
+    # Nessun fallback su ``__file__``: chi sa dov'è il corpus è il chiamante.
+    corpus_dir = Path(corpus_dir) if corpus_dir is not None else Path(RagConfig.corpus_dir)
     manifest = corpus_dir / "manifest.json"
     if manifest.exists():
         return json.loads(manifest.read_text())["corpus_version"]
@@ -245,7 +246,7 @@ def _dichiara_provenienza_impl(cfg: RagConfig, frasi: IndiceFrasi | None, res) -
 
 
 async def build_pipeline(cfg: RagConfig) -> RagPipeline:
-    from app.wiring import (
+    from talkdocs_rag_core.wiring import (
         build_chroma_client,
         build_client,
         build_embedding_service,
@@ -264,18 +265,16 @@ async def build_pipeline(cfg: RagConfig) -> RagPipeline:
     generator = MistralGenerator(cfg, client, term_stats=build_term_stats(cfg, chroma_client))
     semantic_cache = SemanticCache(cfg, embedding_service, chroma_client)
 
-    store = StructuredStore.from_path(REPO_ROOT / "corpus" / "manifest.json")
+    store = StructuredStore.from_path(Path(cfg.corpus_dir) / "manifest.json")
     if store is None:
         logger.warning("manifest.json assente: ramo aggregativo disattivato per questa sessione")
 
     card_dir = Path(cfg.corpus_card_dir)
-    if not card_dir.is_absolute():
-        card_dir = REPO_ROOT / card_dir
     card = CorpusCard.load(card_dir)
     if card is None:
         logger.warning("scheda del corpus assente (%s): risposta meta ridotta alle sole statistiche", card_dir)
 
-    corpus_version = load_corpus_version()
+    corpus_version = load_corpus_version(cfg.corpus_dir)
     agentic = None
     if cfg.router_llm_enabled:
         agentic = AgenticRouter(cfg, client, card, corpus_version=corpus_version)

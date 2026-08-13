@@ -25,8 +25,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.wiring import build_embedding_service, build_hybrid, build_retrieval_store, build_whoosh  # noqa: E402
-from config import RagConfig  # noqa: E402
+from talkdocs_rag_core.config import RagConfig  # noqa: E402
+from talkdocs_rag_core.wiring import (  # noqa: E402
+    build_embedding_service,
+    build_hybrid,
+    build_retrieval_store,
+    build_whoosh,
+)
 
 
 def _support(results) -> float:

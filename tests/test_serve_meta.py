@@ -9,12 +9,12 @@ risposta.
 Senza generatore si degrada alla concatenazione delle sezioni: prolissa ma vera.
 """
 
-from config import RagConfig
-from rag import router
-from rag.corpus_card import CorpusCard
-from rag.generation import RagResult
-from structured.service import serve_meta
-from structured.store import StructuredStore
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.rag import router
+from talkdocs_rag_core.rag.corpus_card import CorpusCard
+from talkdocs_rag_core.rag.generation import RagResult
+from talkdocs_rag_core.structured.service import serve_meta
+from talkdocs_rag_core.structured.store import StructuredStore
 
 
 def _doc(path, title):

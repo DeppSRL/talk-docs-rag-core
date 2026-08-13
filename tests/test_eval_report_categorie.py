@@ -16,8 +16,8 @@ tassonomia ora si **deriva dai dati** invece di essere cablata: una lista che si
 sé non può ri-desincronizzarsi al prossimo cambio di categorie.
 """
 
-from config import RagConfig
-from eval.runner import _aggregate, _markdown, _per_categoria
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.eval.runner import _aggregate, _markdown, _per_categoria
 
 
 def _riga(category, condition="off", **kw):

@@ -21,9 +21,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from config import REPO_ROOT, RagConfig
-from vendor.talkdocs.models.document import Document, DocumentChunk, DocumentMetadata
-from vendor.talkdocs.utils.text_processing import clean_text
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.retrieval.models.document import Document, DocumentChunk, DocumentMetadata
+from talkdocs_rag_core.retrieval.utils.text_processing import clean_text
 
 from .chunking import chunk_document, count_tokens
 from .parsers import SUPPORTED_SUFFIXES, parse_file
@@ -42,6 +42,11 @@ class IngestReport:
     n_files: int
     n_chunks: int
     manifest_path: str
+    # Costo dell'indicizzazione, misurato e non stimato. `embed_cost` è `None` quando il
+    # prezzo non è configurato (`PRICE_EMBED_PER_MTOK`): meglio un campo vuoto che uno zero,
+    # che si legge come «gratis» invece che come «non lo sappiamo».
+    embed_usage: dict[str, int] | None = None
+    embed_cost: float | None = None
 
 
 def _discover_files(corpus_dir: Path, card_dir: Path | None = None) -> list[Path]:
@@ -73,26 +78,43 @@ def _discover_files(corpus_dir: Path, card_dir: Path | None = None) -> list[Path
     return files
 
 
-async def _embed_all(embedding_service, texts: list[str]) -> list[list[float]]:
-    out: list[list[float]] = []
-    for i in range(0, len(texts), EMBED_BATCH):
-        batch = texts[i : i + EMBED_BATCH]
-        out.extend(await embedding_service.get_embeddings(batch))
-    return out
+async def _embed_onto_chunks(embedding_service, chunks: list) -> int:
+    """Embedda a lotti e **assegna subito**, senza materializzare la lista completa.
+
+    Prima si costruiva la lista di tutti i vettori, poi si zippava sui chunk: due contenitori
+    da 13.670 elementi in più (quello dei vettori e quello dei testi) e un errore di
+    disallineamento che si scopriva solo alla fine, sull'intero corpus.
+
+    ⚠️ **Questo non chiude il difetto della memoria**, e non va scritto che lo faccia: il
+    picco è dominato dai vettori *attaccati ai chunk*, che devono sopravvivere fino
+    all'unica chiamata `add_documents`. Togliere i contenitori intermedi vale il loro
+    overhead, non i vettori. Il rimedio vero è scrivere su Chroma **a lotti**, liberando i
+    vettori man mano — cambia il contratto dello store e l'ordine di inserimento, quindi è
+    un incremento suo con la sua misura, non un ritocco da infilare qui.
+
+    L'ordine, i lotti e i valori sono identici a prima: un ritaglio non deve spostare i
+    numeri.
+    """
+    n = 0
+    for i in range(0, len(chunks), EMBED_BATCH):
+        lotto = chunks[i : i + EMBED_BATCH]
+        vettori = await embedding_service.get_embeddings([c.content for c in lotto])
+        for c, emb in zip(lotto, vettori, strict=True):
+            c.embedding = emb
+        n += len(lotto)
+    return n
 
 
 async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestReport:
-    from app.wiring import (
+    from talkdocs_rag_core.wiring import (
         build_chroma_client,
         build_embedding_service,
         build_retrieval_store,
         build_whoosh,
     )
 
-    corpus_dir = corpus_dir or (REPO_ROOT / "corpus")
+    corpus_dir = Path(corpus_dir) if corpus_dir is not None else Path(cfg.corpus_dir)
     card_dir = Path(cfg.corpus_card_dir)
-    if not card_dir.is_absolute():
-        card_dir = REPO_ROOT / card_dir
     files = _discover_files(corpus_dir, card_dir)
     if not files:
         raise SystemExit(
@@ -170,9 +192,7 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
 
     # Embedding di tutti i chunk (batch) → attach.
     flat_chunks = [c for d in all_documents for c in d.chunks]
-    embeddings = await _embed_all(embedding_service, [c.content for c in flat_chunks])
-    for c, emb in zip(flat_chunks, embeddings, strict=True):
-        c.embedding = emb
+    await _embed_onto_chunks(embedding_service, flat_chunks)
 
     # Indicizza in Chroma (denso) + Whoosh (keyword IT). Whoosh in batch: un solo writer
     # e un solo commit — il per-documento del vendored costa 10-20 min su 13.670 chunk
@@ -195,7 +215,7 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
     # abbiamo già in memoria: farlo all'avvio della pipeline costerebbe una passata su tutto
     # il corpus a ogni `ask`.
     if cfg.abstention_idf_threshold > 0:
-        from rag.guard import TermStats
+        from talkdocs_rag_core.rag.guard import TermStats
 
         TermStats.from_documents([c.content for c in flat_chunks]).save(cfg.term_df_path)
         print(f"[ingest] statistiche IDF → {cfg.term_df_path}")
@@ -204,7 +224,7 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
     # qui perché qui i testi interi sono già in memoria — e perché il conteggio che serve è
     # per DOCUMENTO, che a valle, sui chunk, non sarebbe più ricostruibile.
     if cfg.provenienza_enabled:
-        from ingest.frasi import costruisci_indice
+        from talkdocs_rag_core.ingest.frasi import costruisci_indice
 
         indice = costruisci_indice(
             [(d.source_id, d.content) for d in all_documents], soglia=cfg.frase_min_documenti
@@ -248,12 +268,18 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
     manifest_path = corpus_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
+    embed_usage = dict(getattr(embedding_service, "usage", {}) or {})
+    tok = embed_usage.get("total_tokens") or embed_usage.get("prompt_tokens") or 0
+    embed_cost = (tok / 1_000_000) * cfg.price_embed_per_mtok if (tok and cfg.price_embed_per_mtok) else None
+
     return IngestReport(
         corpus_version=corpus_version,
         corpus_content_hash=corpus_content_hash,
         n_files=len(manifest_files),
         n_chunks=total_chunks,
         manifest_path=str(manifest_path),
+        embed_usage=embed_usage or None,
+        embed_cost=embed_cost,
     )
 
 
@@ -271,6 +297,10 @@ def main() -> int:
     print(f"  corpus_content : {report.corpus_content_hash}")
     print(f"  corpus_version : {report.corpus_version}")
     print(f"  manifest       : {report.manifest_path}")
+    if report.embed_usage:
+        u = report.embed_usage
+        costo = f"{report.embed_cost:.6f} $" if report.embed_cost is not None else "prezzo non configurato"
+        print(f"  embedding      : {u.get('calls', 0)} chiamate · {u.get('total_tokens', 0)} token · {costo}")
     return 0
 
 

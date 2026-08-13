@@ -6,8 +6,7 @@ vuote devono essere *escluse*, e la copertura dichiarata.
 """
 
 import pytest
-
-from scripts.eval_human import aggregate, banda, parse_bool, parse_causa, parse_voto
+from talkdocs_rag_core.eval.eval_human import aggregate, banda, parse_bool, parse_causa, parse_voto
 
 
 @pytest.mark.parametrize("raw", ["sì", "si", "SI", " Sì ", "s", "1", "true", "y", "yes", "ok"])

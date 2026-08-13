@@ -9,8 +9,8 @@ Non è cosmetico: ``model_calls`` è il denominatore di ``provider_hit_rate``, q
 gonfiarlo **sottostima** l'hit-rate del prompt caching, che è la metrica centrale del PoC.
 """
 
-from config import RagConfig
-from eval.runner import _aggregate
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.eval.runner import _aggregate
 
 
 def _riga(condition="off", **kw):

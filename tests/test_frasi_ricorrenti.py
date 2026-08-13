@@ -6,14 +6,14 @@ volte) e la sillabazione della Gazzetta («Attri- buzioni»), che rendeva divers
 frasi identiche e teneva nascosto tutto il fenomeno.
 """
 
-from ingest.frasi import (
+from talkdocs_rag_core.ingest.frasi import (
     IndiceFrasi,
     costruisci_indice,
     dividi_in_frasi,
     normalizza,
     ricongiungi_sillabazione,
 )
-from rag.norme import estrai_norme
+from talkdocs_rag_core.rag.norme import estrai_norme
 
 PREMESSA = (
     "VISTA la legge 27 febbraio 1967, n. 48, recante «Attribuzioni e ordinamento del "

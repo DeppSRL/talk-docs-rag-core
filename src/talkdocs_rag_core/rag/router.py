@@ -37,7 +37,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from structured import intents
+from talkdocs_rag_core.structured import intents
 
 STRUCTURED = "structured"
 UNCOVERED = "uncovered"

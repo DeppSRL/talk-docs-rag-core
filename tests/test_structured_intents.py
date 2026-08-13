@@ -5,8 +5,8 @@ I test fissano due proprietà: che nessun valore dell'utente finisca nella *stri
 route degrada a rifiuto dichiarato invece di eseguire una query su un filtro indovinato.
 """
 
-from structured import intents
-from structured.store import StructuredStore
+from talkdocs_rag_core.structured import intents
+from talkdocs_rag_core.structured.store import StructuredStore
 
 MANIFEST = {
     "files": [

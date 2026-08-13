@@ -6,9 +6,9 @@ documenti», ma «questo totale è la somma di queste righe, con questa query, r
 
 import json
 
-from audit.record import AuditWriter
-from rag.generation import RagResult
-from rag.outcomes import StructuredOutcome, VerbatimOutcome
+from talkdocs_rag_core.audit.record import AuditWriter
+from talkdocs_rag_core.rag.generation import RagResult
+from talkdocs_rag_core.rag.outcomes import StructuredOutcome, VerbatimOutcome
 
 
 def _risultato_strutturato():
@@ -62,7 +62,7 @@ def test_i_passaggi_fuori_indice_viaggiano_dentro_la_tupla(tmp_path):
     citata e sarebbe indifendibile. Quelli che vengono dall'indice restano fuori: lì il
     `chunk_id` è già la chiave per rileggerli, e duplicarne il testo gonfierebbe l'audit.
     """
-    from rag.generation import Passage
+    from talkdocs_rag_core.rag.generation import Passage
 
     res = RagResult(
         query="Di cosa parla questo corpus?", answer_text="Raccoglie delibere CIPE [1] …",

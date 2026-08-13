@@ -10,11 +10,10 @@ quando viene annullata: una proposta scartata è un dato.
 import json
 
 import pytest
-
-from config import RagConfig
-from rag import router
-from rag.agentic_router import AgenticRouter, _sanifica_params
-from rag.corpus_card import CorpusCard
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.rag import router
+from talkdocs_rag_core.rag.agentic_router import AgenticRouter, _sanifica_params
+from talkdocs_rag_core.rag.corpus_card import CorpusCard
 
 CARD = CorpusCard(sections=(("00-contesto", "Delibere CIPE/CIPESS."),))
 

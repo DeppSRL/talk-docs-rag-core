@@ -11,7 +11,7 @@ sostenere un'affermazione sul corpus citando ciò che abbiamo scritto noi sul co
 
 from pathlib import Path
 
-from ingest.pipeline import _discover_files
+from talkdocs_rag_core.ingest.pipeline import _discover_files
 
 
 def _corpus(tmp_path: Path) -> Path:

@@ -39,8 +39,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from ingest.frasi import IndiceFrasi, dividi_in_frasi, normalizza, ricongiungi_sillabazione
-from rag.norme import estrai_norme
+from talkdocs_rag_core.ingest.frasi import IndiceFrasi, dividi_in_frasi, normalizza, ricongiungi_sillabazione
+from talkdocs_rag_core.rag.norme import estrai_norme
 
 # Una cifra che vale come «numero proprio» dello span: due o più cifre, per non contare
 # come tale il numero di una legge già catturato dal riferimento normativo (che viene

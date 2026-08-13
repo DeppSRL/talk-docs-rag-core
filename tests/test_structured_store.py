@@ -9,8 +9,7 @@ nell'eval set, non qui, così una nuova `app ingest` non rompe i test unitari.
 import json
 
 import pytest
-
-from structured.store import StructuredStore
+from talkdocs_rag_core.structured.store import StructuredStore
 
 MANIFEST = {
     "corpus_version": "test",

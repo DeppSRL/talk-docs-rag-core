@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, replace
-from pathlib import Path
 
 try:
     from dotenv import load_dotenv
@@ -168,6 +167,11 @@ class RagConfig:
     # --- Scheda del corpus e router agentico (incremento 1b) ---
     # Directory della scheda (contesto semantico scritto a mano, file NN-*.md). Assente
     # o vuota → niente risposta meta dalla scheda, la pipeline degrada senza esplodere.
+    # Radice del corpus. Iniettata e non dedotta da ``__file__``: come libreria, la
+    # radice del pacchetto sta in site-packages, dove il corpus del consumatore non c'è.
+    # Il default è relativo alla CWD — è il default del *consumatore*, non della libreria,
+    # e talk-docs lo passerà esplicito per indice.
+    corpus_dir: str = "corpus"
     corpus_card_dir: str = "corpus/delibere/card"
     # Classificatore LLM a valle del router lessicale. **ACCESO** dal 2026-08-08, dopo
     # tre misure e non per intuizione: nasceva spento, la prima run lo bocciava (quattro
@@ -233,6 +237,10 @@ class RagConfig:
     price_input_per_mtok: float = 0.0
     price_output_per_mtok: float = 0.0
     price_cached_per_mtok: float = 0.0
+    # Prezzo degli embedding, separato da quelli di chat: l'indicizzazione è un costo
+    # UNA-TANTUM per corpus, la generazione è ricorrente per domanda. Sommarli in un'unica
+    # voce nasconderebbe proprio la cifra che serve a quotare un corpus nuovo.
+    price_embed_per_mtok: float = 0.0
 
     # --- Logging / audit ---
     log_level: str = "info"
@@ -280,6 +288,7 @@ class RagConfig:
             verbatim_min_valid_ratio=_get_float("VERBATIM_MIN_VALID_RATIO", cls.verbatim_min_valid_ratio),
             verbatim_min_chars=_get_int("VERBATIM_MIN_CHARS", cls.verbatim_min_chars),
             structured_max_rows=_get_int("STRUCTURED_MAX_ROWS", cls.structured_max_rows),
+            corpus_dir=_get("CORPUS_DIR", cls.corpus_dir),
             corpus_card_dir=_get("CORPUS_CARD_DIR", cls.corpus_card_dir),
             router_llm_enabled=_get_bool("ROUTER_LLM_ENABLED", cls.router_llm_enabled),
             router_llm_max_tokens=_get_int("ROUTER_LLM_MAX_TOKENS", cls.router_llm_max_tokens),
@@ -295,10 +304,8 @@ class RagConfig:
             price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", cls.price_input_per_mtok),
             price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", cls.price_output_per_mtok),
             price_cached_per_mtok=_get_float("PRICE_CACHED_PER_MTOK", cls.price_cached_per_mtok),
+            price_embed_per_mtok=_get_float("PRICE_EMBED_PER_MTOK", cls.price_embed_per_mtok),
             log_level=_get("LOG_LEVEL", cls.log_level),
             audit_log_dir=_get("AUDIT_LOG_DIR", cls.audit_log_dir),
         )
 
-
-# Radice del repo, utile a ingest/audit per path relativi stabili.
-REPO_ROOT = Path(__file__).resolve().parent

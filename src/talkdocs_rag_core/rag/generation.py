@@ -18,8 +18,8 @@ from dataclasses import dataclass, field
 
 from openai import BadRequestError, OpenAI, UnprocessableEntityError
 
-from config import RagConfig
-from vendor.talkdocs.services.hybrid_search import HybridSearchResult
+from talkdocs_rag_core.config import RagConfig
+from talkdocs_rag_core.retrieval.services.hybrid_search import HybridSearchResult
 
 from .guard import TermStats, abstention_signal
 from .outcomes import StructuredOutcome, VerbatimOutcome
