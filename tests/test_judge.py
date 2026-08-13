@@ -9,6 +9,7 @@ che non si può sbagliare due volte: **un giudizio già dato non si perde**.
 import json
 
 import pytest
+
 from talkdocs_rag_core.eval import judge
 from talkdocs_rag_core.eval.spot_check import COLONNE_FORM
 

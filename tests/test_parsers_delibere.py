@@ -11,6 +11,7 @@ Citare "CIPE n. 75/2021" sarebbe un errore di merito, non di forma.
 """
 
 import pytest
+
 from talkdocs_rag_core.ingest.parsers import metadati_delibera, titolo_delibera
 
 

@@ -10,6 +10,7 @@ quando viene annullata: una proposta scartata è un dato.
 import json
 
 import pytest
+
 from talkdocs_rag_core.config import RagConfig
 from talkdocs_rag_core.rag import router
 from talkdocs_rag_core.rag.agentic_router import AgenticRouter, _sanifica_params

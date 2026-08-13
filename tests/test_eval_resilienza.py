@@ -16,6 +16,7 @@ import asyncio
 
 import pytest
 from openai import RateLimitError
+
 from talkdocs_rag_core.config import RagConfig
 from talkdocs_rag_core.eval.runner import EvalItem, _aggregate, _ask_con_ripresa, _row, _run_condition
 

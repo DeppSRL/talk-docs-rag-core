@@ -13,6 +13,7 @@ crede di averli risolti senza misurarli.
 """
 
 import pytest
+
 from talkdocs_rag_core.rag import router
 from talkdocs_rag_core.structured import intents
 

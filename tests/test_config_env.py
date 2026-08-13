@@ -12,6 +12,7 @@ iniziare con ``#``: un valore così è un residuo di commento e va trattato come
 """
 
 import pytest
+
 from talkdocs_rag_core.config import RagConfig, _get, _get_bool, _get_float, _get_int
 
 

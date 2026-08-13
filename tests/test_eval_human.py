@@ -6,6 +6,7 @@ vuote devono essere *escluse*, e la copertura dichiarata.
 """
 
 import pytest
+
 from talkdocs_rag_core.eval.eval_human import aggregate, banda, parse_bool, parse_causa, parse_voto
 
 

@@ -13,6 +13,7 @@ l'indice su runner effimero prima di ogni retrieve/ask/eval.
 import asyncio
 
 import pytest
+
 from talkdocs_rag_core.retrieval.vector_stores.whoosh_index import WhooshKeywordIndex
 
 
