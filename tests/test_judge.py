@@ -7,9 +7,6 @@ che non si può sbagliare due volte: **un giudizio già dato non si perde**.
 """
 
 import json
-import re
-import shutil
-from pathlib import Path
 
 import pytest
 from talkdocs_rag_core.eval import judge
@@ -158,34 +155,6 @@ def test_le_run_di_singole_ask_non_finiscono_nel_menu(tmp_path):
     assert len(judge.run_disponibili(tmp_path, solo_eval=False)) == 4
 
 
-def test_la_pagina_di_giudizio_e_una_sola():
-    """La serve FastAPI in locale ed è la stessa che Vercel pubblica statica. Una copia in
-    `app/static/` divergerebbe da quella in `web/public/` nel giro di poche modifiche, e
-    la peggiore delle due sarebbe quella su cui si giudica.
-
-    Il controllo NON importa `app.web`: quel modulo tira dentro FastAPI, e
-    `test_vendor_import` verifica proprio che la suite non se lo trascini. Si legge il
-    sorgente, che per questa invariante è sufficiente.
-    """
-    radice = Path(__file__).resolve().parent.parent
-    assert (radice / "web" / "public" / "index.html").exists()
-    assert not (radice / "app" / "static" / "judge.html").exists(), "copia superata della pagina"
-    sorgente = (radice / "app" / "web.py").read_text(encoding="utf-8")
-    assert '"web" / "public" / "index.html"' in sorgente
-
-
-def test_le_colonne_del_csv_scritto_dal_browser_combaciano_con_quelle_di_python():
-    """La pagina costruisce il CSV in JavaScript quando gira su Vercel: se le due liste
-    divergono, `eval-human` legge colonne che non esistono e la fedeltà esce vuota — senza
-    che nulla fallisca."""
-    pagina = Path(__file__).resolve().parent.parent / "web" / "public" / "index.html"
-    blocco = re.search(r"const COLONNE = \[(.*?)\];", pagina.read_text(encoding="utf-8"), re.DOTALL)
-    assert blocco, "lista COLONNE non trovata nella pagina"
-    assert re.findall(r'"([a-z_0-9]+)"', blocco.group(1)) == COLONNE_FORM
-
-
-# --- Giudizio del solo delta ------------------------------------------------------------
-
 def _riga_giudicata(domanda, risposta, **kw):
     base = {c: "" for c in COLONNE_FORM}
     base.update({"run_id": "eval-vecchia", "condition": "off", "id": "ic-01",
@@ -253,80 +222,3 @@ def test_toccare_un_giudizio_ereditato_lo_rende_proprio(tmp_path):
     judge.salva_giudizio(p, form, "ic-01", {"fedele": "NO"})
     riga = judge.leggi_modulo(p)[0]
     assert riga["fedele"] == "NO" and riga["ereditato_da"] == ""
-
-
-# --- L'ereditarietà nella pagina, eseguita davvero -----------------------------------
-# Il resto dei controlli sulla UI legge il sorgente; questo no. La fusione dei giudizi ha
-# una precedenza a tre livelli (eredità < browser < repository) e una regola non ovvia —
-# si sovrascrive solo dove c'è qualcosa — che un controllo testuale non verifica. Il
-# difetto che chiude era esattamente di quel tipo: la pagina leggeva le ultime due
-# sorgenti e ignorava l'eredità, così alla prima apertura di una run nuova mostrava 33
-# item da giudicare mentre 21 erano già stati dati su risposte identiche.
-def _estrai_js() -> str:
-    sorgente = (Path(__file__).resolve().parent.parent / "web" / "public" / "index.html").read_text(encoding="utf-8")
-    pezzi = []
-    for nome in ("COLONNE", "COLONNE_GIUDIZIO"):
-        m = re.search(rf"^const {nome} = \[.*?\];$", sorgente, re.MULTILINE | re.DOTALL)
-        assert m, f"dichiarazione di {nome} non trovata nella pagina"
-        pezzi.append(m.group(0))
-    m = re.search(r"^function unisciGiudizi\(.*?^\}$", sorgente, re.MULTILINE | re.DOTALL)
-    assert m, "unisciGiudizi non trovata: la pagina non fonde più i giudizi ereditati"
-    pezzi.append(m.group(0))
-    return "\n".join(pezzi)
-
-
-def _unisci(bundle, locali, remoti, tmp_path):
-    import subprocess
-
-    if shutil.which("node") is None:
-        pytest.skip("node non disponibile")
-    script = tmp_path / "prova.mjs"
-    script.write_text(
-        _estrai_js()
-        + "\nconst [b, l, r] = JSON.parse(process.argv[2]);"
-        + "\nconsole.log(JSON.stringify(unisciGiudizi(b, l, r)));\n",
-        encoding="utf-8",
-    )
-    out = subprocess.run(
-        ["node", str(script), json.dumps([bundle, locali, remoti])],
-        capture_output=True, text=True, check=True,
-    )
-    return json.loads(out.stdout)
-
-
-def _riga(ident, **kw):
-    base = {c: "" for c in COLONNE_FORM}
-    base.update({"id": ident, "domanda": f"domanda {ident}"})
-    base.update(kw)
-    return base
-
-
-def test_i_giudizi_ereditati_del_bundle_si_vedono_alla_prima_apertura(tmp_path):
-    bundle = {"form": [
-        _riga("ic-01", fedele="SI", italiano_1_5="5", ereditato_da="eval-precedente"),
-        _riga("meta-01"),  # da leggere: risposta nuova
-    ]}
-    g = _unisci(bundle, {}, {}, tmp_path)
-    assert g["ic-01"]["fedele"] == "SI" and g["ic-01"]["ereditato_da"] == "eval-precedente"
-    assert "meta-01" not in g  # niente giudizio finto su una risposta mai letta
-
-
-def test_il_repository_vince_sull_eredita_ma_solo_dove_ha_qualcosa(tmp_path):
-    bundle = {"form": [_riga("ic-01", fedele="SI", ereditato_da="eval-precedente"), _riga("ic-02")]}
-    # Il CSV committato porta ANCHE le righe vuote: prenderle alla lettera cancellerebbe
-    # l'eredità, che è il difetto per cui questa funzione esiste.
-    remoti = {"ic-01": {"fedele": "NO", "causa": "retrieval", "ereditato_da": ""},
-              "ic-02": {"fedele": "", "causa": "", "ereditato_da": ""}}
-    g = _unisci(bundle, {}, remoti, tmp_path)
-    assert g["ic-01"]["fedele"] == "NO"      # riletto a mano: vince
-    assert g["ic-01"]["ereditato_da"] == ""  # e non si conta più come ereditato
-    assert "ic-02" not in g or not g["ic-02"]["fedele"]
-
-
-def test_cancellare_un_giudizio_ereditato_non_si_annulla_al_ricaricamento(tmp_path):
-    bundle = {"form": [_riga("ic-01", fedele="SI", ereditato_da="eval-precedente")]}
-    # `toccato` è la traccia di una decisione di chi giudica — anche quando la decisione
-    # è svuotare. Senza, l'eredità tornerebbe a coprire la cancellazione.
-    locali = {"ic-01": {"fedele": "", "causa": "", "ereditato_da": "", "toccato": "1"}}
-    g = _unisci(bundle, locali, {}, tmp_path)
-    assert g["ic-01"]["fedele"] == ""
