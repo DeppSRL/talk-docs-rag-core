@@ -251,10 +251,12 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
     )
     corpus_version = _sha256(version_material)
 
+    # Niente timestamp qui: il manifest è committato dal consumatore e rigenerato a ogni
+    # ingest → deve essere idempotente anche a livello di git (nessun diff a corpus e
+    # parametri invariati). La provenienza temporale delle run vive nelle tuple di audit.
     manifest = {
         "corpus_version": corpus_version,
         "corpus_content_hash": corpus_content_hash,
-        "generated_at_utc": datetime.now(tz=UTC).isoformat(),
         "params": {
             "chunk_tokens": cfg.chunk_tokens,
             "chunk_overlap_ratio": cfg.chunk_overlap_ratio,
