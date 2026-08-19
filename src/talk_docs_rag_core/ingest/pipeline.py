@@ -21,9 +21,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from talkdocs_rag_core.config import RagConfig
-from talkdocs_rag_core.retrieval.models.document import Document, DocumentChunk, DocumentMetadata
-from talkdocs_rag_core.retrieval.utils.text_processing import clean_text
+from talk_docs_rag_core.config import RagConfig
+from talk_docs_rag_core.retrieval.models.document import Document, DocumentChunk, DocumentMetadata
+from talk_docs_rag_core.retrieval.utils.text_processing import clean_text
 
 from .chunking import chunk_document, count_tokens
 from .parsers import SUPPORTED_SUFFIXES, parse_file
@@ -106,7 +106,7 @@ async def _embed_onto_chunks(embedding_service, chunks: list) -> int:
 
 
 async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestReport:
-    from talkdocs_rag_core.wiring import (
+    from talk_docs_rag_core.wiring import (
         build_chroma_client,
         build_embedding_service,
         build_retrieval_store,
@@ -215,7 +215,7 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
     # abbiamo già in memoria: farlo all'avvio della pipeline costerebbe una passata su tutto
     # il corpus a ogni `ask`.
     if cfg.abstention_idf_threshold > 0:
-        from talkdocs_rag_core.rag.guard import TermStats
+        from talk_docs_rag_core.rag.guard import TermStats
 
         TermStats.from_documents([c.content for c in flat_chunks]).save(cfg.term_df_path)
         print(f"[ingest] statistiche IDF → {cfg.term_df_path}")
@@ -224,7 +224,7 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
     # qui perché qui i testi interi sono già in memoria — e perché il conteggio che serve è
     # per DOCUMENTO, che a valle, sui chunk, non sarebbe più ricostruibile.
     if cfg.provenienza_enabled:
-        from talkdocs_rag_core.ingest.frasi import costruisci_indice
+        from talk_docs_rag_core.ingest.frasi import costruisci_indice
 
         indice = costruisci_indice(
             [(d.source_id, d.content) for d in all_documents], soglia=cfg.frase_min_documenti

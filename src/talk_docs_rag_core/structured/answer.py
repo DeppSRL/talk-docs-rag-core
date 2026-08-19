@@ -22,8 +22,8 @@ dal corpus»), che resta dentro il perimetro senza ridichiararlo.
 
 from __future__ import annotations
 
-from talkdocs_rag_core.rag.outcomes import StructuredOutcome
-from talkdocs_rag_core.structured import intents
+from talk_docs_rag_core.rag.outcomes import StructuredOutcome
+from talk_docs_rag_core.structured import intents
 
 # Vale per il conteggio, per l'elenco e per la distribuzione: sotto un elenco di titoli
 # «il conteggio è calcolato» sarebbe la cosa sbagliata. Non ripete il perimetro, già

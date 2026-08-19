@@ -7,10 +7,10 @@ confronto A/B del caching starebbe misurando una chiamata che non esiste.
 import logging
 import re
 
-from talkdocs_rag_core.config import RagConfig
-from talkdocs_rag_core.rag import router
-from talkdocs_rag_core.structured.service import _TESTI_RIFIUTO, serve_structured, serve_uncovered
-from talkdocs_rag_core.structured.store import StructuredStore
+from talk_docs_rag_core.config import RagConfig
+from talk_docs_rag_core.rag import router
+from talk_docs_rag_core.structured.service import _TESTI_RIFIUTO, serve_structured, serve_uncovered
+from talk_docs_rag_core.structured.store import StructuredStore
 
 MANIFEST = {
     "files": [

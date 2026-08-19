@@ -6,9 +6,9 @@ configurazioni, perché la run di misura gira a soglia 0 e la taratura arriva do
 
 import json
 
-from talkdocs_rag_core.config import RagConfig
-from talkdocs_rag_core.rag.generation import MistralGenerator
-from talkdocs_rag_core.retrieval.services.hybrid_search import HybridSearchResult
+from talk_docs_rag_core.config import RagConfig
+from talk_docs_rag_core.rag.generation import MistralGenerator
+from talk_docs_rag_core.retrieval.services.hybrid_search import HybridSearchResult
 
 TESTO = (
     "Il Comitato assegna in via programmatica la somma di euro 295.178.000 a valere "
@@ -46,7 +46,7 @@ def _payload(verbatim: str):
 
 
 def test_schema_richiede_il_verbatim():
-    from talkdocs_rag_core.rag.schema import STRUCTURED_RESPONSE_SCHEMA
+    from talk_docs_rag_core.rag.schema import STRUCTURED_RESPONSE_SCHEMA
 
     claim = STRUCTURED_RESPONSE_SCHEMA["json_schema"]["schema"]["properties"]["claims"]["items"]
     assert "verbatim" in claim["properties"]

@@ -12,7 +12,7 @@ Citare "CIPE n. 75/2021" sarebbe un errore di merito, non di forma.
 
 import pytest
 
-from talkdocs_rag_core.ingest.parsers import metadati_delibera, titolo_delibera
+from talk_docs_rag_core.ingest.parsers import metadati_delibera, titolo_delibera
 
 
 @pytest.mark.parametrize(
@@ -66,7 +66,7 @@ def test_nessun_codice_ritorna_none(stem):
 
 def test_parse_file_usa_il_titolo_delibera(tmp_path):
     """Integrazione: un .txt di corpus con nome canonico riceve il titolo della delibera."""
-    from talkdocs_rag_core.ingest.parsers import parse_file
+    from talk_docs_rag_core.ingest.parsers import parse_file
 
     p = tmp_path / "E210075.txt"
     p.write_text("IL COMITATO INTERMINISTERIALE\n\nVISTA la legge...", encoding="utf-8")
@@ -76,7 +76,7 @@ def test_parse_file_usa_il_titolo_delibera(tmp_path):
 
 
 def test_parse_file_txt_generico_resta_sul_nome(tmp_path):
-    from talkdocs_rag_core.ingest.parsers import parse_file
+    from talk_docs_rag_core.ingest.parsers import parse_file
 
     p = tmp_path / "nota-di-metodo.txt"
     p.write_text("contenuto", encoding="utf-8")

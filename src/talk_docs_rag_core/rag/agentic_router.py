@@ -31,11 +31,11 @@ import time
 
 from openai import OpenAI
 
-from talkdocs_rag_core.config import RagConfig
-from talkdocs_rag_core.rag import router
-from talkdocs_rag_core.rag.corpus_card import CorpusCard
-from talkdocs_rag_core.rag.generation import usage_dict
-from talkdocs_rag_core.structured import intents
+from talk_docs_rag_core.config import RagConfig
+from talk_docs_rag_core.rag import router
+from talk_docs_rag_core.rag.corpus_card import CorpusCard
+from talk_docs_rag_core.rag.generation import usage_dict
+from talk_docs_rag_core.structured import intents
 
 logger = logging.getLogger(__name__)
 

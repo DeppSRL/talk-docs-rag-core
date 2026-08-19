@@ -1,4 +1,4 @@
-"""`talkdocs-rag-core` — il nucleo RAG grounded, senza strato applicativo.
+"""`talk-docs-rag-core` — il nucleo RAG grounded, senza strato applicativo.
 
 Contiene ciò che rende una risposta *difendibile*, non ciò che la serve: retrieval ibrido,
 rifiuto deterministico su soglia, astensione per segnale IDF, verifica delle citazioni a
@@ -20,17 +20,17 @@ valore tarato sul corpus delle delibere CIPE/CIPESS (0,79 su `mistral-embed-2312
 dimensioni) **non significa nulla** su un altro corpus o con un altro modello di embedding.
 
 Per questo il pacchetto spedisce la **procedura di taratura**
-(`talkdocs_rag_core.eval.tara_soglia`) e non un default sensato: un secondo indice che
+(`talk_docs_rag_core.eval.tara_soglia`) e non un default sensato: un secondo indice che
 eredita la soglia del primo eredita un numero trovato altrove, e la sua disciplina del
 rifiuto diventa una coincidenza.
 """
 
 from __future__ import annotations
 
-from talkdocs_rag_core.config import RagConfig
-from talkdocs_rag_core.ingest.pipeline import IngestReport, run_ingest
-from talkdocs_rag_core.pipeline import RagPipeline, build_pipeline, load_corpus_version
-from talkdocs_rag_core.rag.generation import RagResult
+from talk_docs_rag_core.config import RagConfig
+from talk_docs_rag_core.ingest.pipeline import IngestReport, run_ingest
+from talk_docs_rag_core.pipeline import RagPipeline, build_pipeline, load_corpus_version
+from talk_docs_rag_core.rag.generation import RagResult
 
 __all__ = [
     # configurazione — il punto d'ingresso di ogni consumatore

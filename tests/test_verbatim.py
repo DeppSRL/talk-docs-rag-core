@@ -10,9 +10,9 @@ substring c'è e il controllo passa. Quel guasto lo prende il guardiano IDF a mo
 sua causa vera è il retrieval.
 """
 
-from talkdocs_rag_core.rag import guard
-from talkdocs_rag_core.rag.generation import Passage
-from talkdocs_rag_core.rag.verbatim import (
+from talk_docs_rag_core.rag import guard
+from talk_docs_rag_core.rag.generation import Passage
+from talk_docs_rag_core.rag.verbatim import (
     ESITO_MISATTRIBUITO,
     ESITO_NON_TROVATO,
     ESITO_TROPPO_CORTO,

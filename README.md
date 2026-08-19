@@ -1,4 +1,4 @@
-# talkdocs-rag-core
+# talk-docs-rag-core
 
 Nucleo RAG *grounded* estratto dal banco di misura `parlaconme-mistral-poc`: retrieval
 ibrido (vettoriale + keyword italiano, fusione RRF), **rifiuto deterministico** su soglia di
@@ -21,14 +21,14 @@ cambiare sotto i piedi di una misura):
 
 ```toml
 dependencies = [
-  "talkdocs-rag-core @ git+https://github.com/DeppSRL/parlaconme-mistral-poc@<sha>#subdirectory=packages/talkdocs-rag-core",
+  "talk-docs-rag-core @ git+https://github.com/DeppSRL/parlaconme-mistral-poc@<sha>#subdirectory=packages/talk-docs-rag-core",
 ]
 ```
 
 ## Uso
 
 ```python
-from talkdocs_rag_core import RagConfig, build_pipeline, run_ingest
+from talk_docs_rag_core import RagConfig, build_pipeline, run_ingest
 
 cfg = RagConfig.from_env()                    # oppure RagConfig(...) esplicita, per indice
 report = await run_ingest(cfg)                 # corpus → Chroma + Whoosh + manifest
@@ -44,7 +44,7 @@ res.support_score, res.usage                  # per l'audit e per il costo
 
 1. **La soglia di supporto.** `support_threshold` è un coseno su un modello di embedding
    specifico: 0,79 vale su `mistral-embed-2312` a 1024 dimensioni **sul corpus delle
-   delibere**. Su un corpus nuovo si ri-tara con `talkdocs_rag_core.eval.tara_soglia`. È la
+   delibere**. Su un corpus nuovo si ri-tara con `talk_docs_rag_core.eval.tara_soglia`. È la
    procedura, non il numero, il pezzo che rende una giornata sufficiente.
 2. **Il modello di embedding, a caldo.** Cambiarlo su un indice esistente invalida la
    collection (1024 e 1536 dimensioni non sono compatibili): è una scelta **alla creazione**
@@ -52,7 +52,7 @@ res.support_score, res.usage                  # per l'audit e per il costo
 
 ## Provenienza
 
-`src/talkdocs_rag_core/retrieval/` viene dal nucleo di talk-docs, commit
+`src/talk_docs_rag_core/retrieval/` viene dal nucleo di talk-docs, commit
 `6dd976c946bc5ef296dd4f6c8e7b00a242dc6c2b` — vedi il `NOTICE` lì accanto. Da questo
 pacchetto in avanti la direzione si inverte: era vendorizzato *da* talk-docs, ora è il codice
 che talk-docs **consuma**.

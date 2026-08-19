@@ -19,8 +19,8 @@ I test async girano con ``asyncio.run`` e non con ``pytest.mark.asyncio``: il re
 
 import asyncio
 
-from talkdocs_rag_core.config import RagConfig, _get_float
-from talkdocs_rag_core.retrieval.services.embeddings import EmbeddingService
+from talk_docs_rag_core.config import RagConfig, _get_float
+from talk_docs_rag_core.retrieval.services.embeddings import EmbeddingService
 
 
 class _Usage:

@@ -10,7 +10,7 @@ Due rischi specifici:
 
 import json
 
-from talkdocs_rag_core.eval.spot_check import COLONNE_FORM, _contesto, _da_giudicare, _risposta, _tipo, build_form
+from talk_docs_rag_core.eval.spot_check import COLONNE_FORM, _contesto, _da_giudicare, _risposta, _tipo, build_form
 
 
 def _rec(query="d", *, refused=False, from_cache=False, cache_enabled=False, retrieved=None, cited=None):

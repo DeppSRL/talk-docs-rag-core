@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from talkdocs_rag_core.structured.store import StructuredStore
+from talk_docs_rag_core.structured.store import StructuredStore
 
 MANIFEST = {
     "corpus_version": "test",

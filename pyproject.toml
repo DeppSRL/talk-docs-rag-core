@@ -1,5 +1,5 @@
 [project]
-name = "talkdocs-rag-core"
+name = "talk-docs-rag-core"
 version = "0.1.0"
 description = "Nucleo RAG grounded: retrieval ibrido, rifiuto deterministico, citazioni verificate, harness di valutazione"
 readme = "README.md"
@@ -38,13 +38,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/talkdocs_rag_core"]
+packages = ["src/talk_docs_rag_core"]
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
 # Quando il pacchetto è un repository per conto suo, ruff gira dalla sua radice e senza
-# questa riga non riconosce `talkdocs_rag_core` come first-party: lo ordina fra le
+# questa riga non riconosce `talk_docs_rag_core` come first-party: lo ordina fra le
 # dipendenze di terze parti, e l'ordinamento degli import diverge fra i due repository
 # sugli stessi file. Un lint che dà due risposte diverse sullo stesso codice smette di
 # essere un lint.
@@ -52,7 +52,7 @@ src = ["src"]
 # `retrieval/` è copia dal commit pinnato di talk-docs (vedi src/.../retrieval/NOTICE): non
 # lo riformattiamo, per tenere leggibile il diff verso l'origine finché la direzione si
 # inverte del tutto.
-extend-exclude = ["src/talkdocs_rag_core/retrieval/"]
+extend-exclude = ["src/talk_docs_rag_core/retrieval/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

@@ -5,10 +5,10 @@ chunk citati: senza un ramo dedicato la metrica la segnerebbe come priva di font
 l'errore già visto tre volte, col segno invertito.
 """
 
-from talkdocs_rag_core.config import RagConfig
-from talkdocs_rag_core.eval.runner import EvalItem, _aggregate, _row, _verdict
-from talkdocs_rag_core.rag.generation import RagResult
-from talkdocs_rag_core.rag.outcomes import StructuredOutcome
+from talk_docs_rag_core.config import RagConfig
+from talk_docs_rag_core.eval.runner import EvalItem, _aggregate, _row, _verdict
+from talk_docs_rag_core.rag.generation import RagResult
+from talk_docs_rag_core.rag.outcomes import StructuredOutcome
 
 
 def _res_strutturato(valore=93):

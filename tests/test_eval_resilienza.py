@@ -17,8 +17,8 @@ import asyncio
 import pytest
 from openai import RateLimitError
 
-from talkdocs_rag_core.config import RagConfig
-from talkdocs_rag_core.eval.runner import EvalItem, _aggregate, _ask_con_ripresa, _row, _run_condition
+from talk_docs_rag_core.config import RagConfig
+from talk_docs_rag_core.eval.runner import EvalItem, _aggregate, _ask_con_ripresa, _row, _run_condition
 
 
 def _rate_limit() -> RateLimitError:
@@ -45,7 +45,7 @@ class _PipelineFinta:
         self.chiamate += 1
         if self.chiamate <= self.n_fallimenti or not self.guarisce:
             raise _rate_limit()
-        from talkdocs_rag_core.rag.generation import RagResult
+        from talk_docs_rag_core.rag.generation import RagResult
 
         return RagResult(
             query=query, answer_text="ok [1]", refused=False, refusal_reason=None,

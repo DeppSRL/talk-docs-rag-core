@@ -11,10 +11,10 @@ import json
 
 import pytest
 
-from talkdocs_rag_core.config import RagConfig
-from talkdocs_rag_core.rag import router
-from talkdocs_rag_core.rag.agentic_router import AgenticRouter, _sanifica_params
-from talkdocs_rag_core.rag.corpus_card import CorpusCard
+from talk_docs_rag_core.config import RagConfig
+from talk_docs_rag_core.rag import router
+from talk_docs_rag_core.rag.agentic_router import AgenticRouter, _sanifica_params
+from talk_docs_rag_core.rag.corpus_card import CorpusCard
 
 CARD = CorpusCard(sections=(("00-contesto", "Delibere CIPE/CIPESS."),))
 

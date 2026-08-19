@@ -14,8 +14,8 @@ crede di averli risolti senza misurarli.
 
 import pytest
 
-from talkdocs_rag_core.rag import router
-from talkdocs_rag_core.structured import intents
+from talk_docs_rag_core.rag import router
+from talk_docs_rag_core.structured import intents
 
 
 @pytest.mark.parametrize(

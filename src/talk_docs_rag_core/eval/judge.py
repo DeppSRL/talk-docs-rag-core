@@ -27,8 +27,8 @@ import json
 import re
 from pathlib import Path
 
-from talkdocs_rag_core.config import RagConfig
-from talkdocs_rag_core.eval.spot_check import (
+from talk_docs_rag_core.config import RagConfig
+from talk_docs_rag_core.eval.spot_check import (
     COLONNE_FORM,
     COLONNE_GIUDIZIO,
     _contesto,

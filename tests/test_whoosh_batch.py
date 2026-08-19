@@ -14,7 +14,7 @@ import asyncio
 
 import pytest
 
-from talkdocs_rag_core.retrieval.vector_stores.whoosh_index import WhooshKeywordIndex
+from talk_docs_rag_core.retrieval.vector_stores.whoosh_index import WhooshKeywordIndex
 
 
 def _chunks(n: int, prefisso: str = "delibere/2024/E240001.txt"):

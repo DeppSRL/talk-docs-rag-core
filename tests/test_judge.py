@@ -10,8 +10,8 @@ import json
 
 import pytest
 
-from talkdocs_rag_core.eval import judge
-from talkdocs_rag_core.eval.spot_check import COLONNE_FORM
+from talk_docs_rag_core.eval import judge
+from talk_docs_rag_core.eval.spot_check import COLONNE_FORM
 
 
 def _rec(query, ident_noto=True, **kw):

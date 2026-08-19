@@ -7,7 +7,7 @@ Il richiamo sulle formulazioni colloquiali è lavoro del router agentico, non de
 
 import pytest
 
-from talkdocs_rag_core.rag import router
+from talk_docs_rag_core.rag import router
 
 
 @pytest.mark.parametrize(

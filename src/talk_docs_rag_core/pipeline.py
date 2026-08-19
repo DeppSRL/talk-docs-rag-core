@@ -11,17 +11,17 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from talkdocs_rag_core.cache.meta import CacheMeta, impronta_scheda
-from talkdocs_rag_core.cache.semantic import SemanticCache
-from talkdocs_rag_core.config import RagConfig
-from talkdocs_rag_core.ingest.frasi import IndiceFrasi
-from talkdocs_rag_core.rag import provenienza as prov_mod
-from talkdocs_rag_core.rag import router
-from talkdocs_rag_core.rag.agentic_router import AgenticRouter
-from talkdocs_rag_core.rag.corpus_card import CorpusCard
-from talkdocs_rag_core.rag.generation import MistralGenerator, RagResult
-from talkdocs_rag_core.structured.service import serve_meta, serve_structured, serve_uncovered
-from talkdocs_rag_core.structured.store import StructuredStore
+from talk_docs_rag_core.cache.meta import CacheMeta, impronta_scheda
+from talk_docs_rag_core.cache.semantic import SemanticCache
+from talk_docs_rag_core.config import RagConfig
+from talk_docs_rag_core.ingest.frasi import IndiceFrasi
+from talk_docs_rag_core.rag import provenienza as prov_mod
+from talk_docs_rag_core.rag import router
+from talk_docs_rag_core.rag.agentic_router import AgenticRouter
+from talk_docs_rag_core.rag.corpus_card import CorpusCard
+from talk_docs_rag_core.rag.generation import MistralGenerator, RagResult
+from talk_docs_rag_core.structured.service import serve_meta, serve_structured, serve_uncovered
+from talk_docs_rag_core.structured.store import StructuredStore
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +246,7 @@ def _dichiara_provenienza_impl(cfg: RagConfig, frasi: IndiceFrasi | None, res) -
 
 
 async def build_pipeline(cfg: RagConfig) -> RagPipeline:
-    from talkdocs_rag_core.wiring import (
+    from talk_docs_rag_core.wiring import (
         build_chroma_client,
         build_client,
         build_embedding_service,

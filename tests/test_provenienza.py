@@ -6,8 +6,8 @@ meccanismo è utile o rumoroso: l'ancora è lo span del claim (non il passaggio)
 che porta una cifra propria non è mai boilerplate.
 """
 
-from talkdocs_rag_core.ingest.frasi import costruisci_indice
-from talkdocs_rag_core.rag import provenienza as P
+from talk_docs_rag_core.ingest.frasi import costruisci_indice
+from talk_docs_rag_core.rag import provenienza as P
 
 PREMESSA = (
     "VISTA la legge 27 febbraio 1967, n. 48, recante «Attribuzioni e ordinamento del Ministero "
@@ -78,7 +78,7 @@ def test_sotto_soglia_non_si_dichiara_niente():
 
 
 def test_indice_vuoto_lascia_la_risposta_intatta():
-    from talkdocs_rag_core.ingest.frasi import IndiceFrasi
+    from talk_docs_rag_core.ingest.frasi import IndiceFrasi
 
     prov = P.calcola([_claim(PREMESSA[:130])], {1: PREMESSA}, IndiceFrasi.vuoto(), 3)
     assert prov.vuota

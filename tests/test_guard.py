@@ -10,7 +10,7 @@ import math
 
 import pytest
 
-from talkdocs_rag_core.rag.guard import TermStats, abstention_signal, content_terms, missing_terms
+from talk_docs_rag_core.rag.guard import TermStats, abstention_signal, content_terms, missing_terms
 
 
 def test_content_terms_scarta_stopword_e_interrogativi():
