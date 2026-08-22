@@ -78,22 +78,24 @@ def _discover_files(corpus_dir: Path, card_dir: Path | None = None) -> list[Path
     return files
 
 
-async def _embed_onto_chunks(embedding_service, chunks: list) -> int:
-    """Embedda a lotti e **assegna subito**, senza materializzare la lista completa.
+async def _embedda_e_scrivi_a_lotti(embedding_service, store, chunks: list, metadata_json: dict) -> int:
+    """Embedda un lotto, lo scrive, **libera i vettori**. Poi il lotto successivo.
 
-    Prima si costruiva la lista di tutti i vettori, poi si zippava sui chunk: due contenitori
-    da 13.670 elementi in più (quello dei vettori e quello dei testi) e un errore di
-    disallineamento che si scopriva solo alla fine, sull'intero corpus.
+    È il rimedio al difetto della memoria dell'ingest, e la forma è tutta qui: prima i
+    vettori di tutto il corpus dovevano sopravvivere fino all'unica chiamata
+    `add_documents` finale — 18.396 chunk × 1024 float distinti, centinaia di MiB che
+    nessuno rilegge più. Ora nessun vettore vive più a lungo del lotto che l'ha prodotto.
 
-    ⚠️ **Questo non chiude il difetto della memoria**, e non va scritto che lo faccia: il
-    picco è dominato dai vettori *attaccati ai chunk*, che devono sopravvivere fino
-    all'unica chiamata `add_documents`. Togliere i contenitori intermedi vale il loro
-    overhead, non i vettori. Il rimedio vero è scrivere su Chroma **a lotti**, liberando i
-    vettori man mano — cambia il contratto dello store e l'ordine di inserimento, quindi è
-    un incremento suo con la sua misura, non un ritocco da infilare qui.
+    **I lotti di embedding sono gli stessi di prima** (`EMBED_BATCH`, nello stesso ordine):
+    stesse chiamate al provider, stessi token, stessi vettori. Cambia solo *quando* si
+    scrive — e quindi l'ordine di inserimento in Chroma, che per una ricerca per similarità
+    non è un ordine di cui qualcosa dipenda.
 
-    L'ordine, i lotti e i valori sono identici a prima: un ritaglio non deve spostare i
-    numeri.
+    Ciò che il picco NON perde: i testi. Il calcolo dell'IDF e l'indice delle frasi
+    ricorrenti rileggono i contenuti dopo l'indicizzazione, e il conteggio delle frasi è
+    **per documento** — a valle, sui chunk, non sarebbe più ricostruibile. Quindi i testi
+    restano in memoria per costruzione, e sono il pavimento sotto cui questa funzione non
+    può scendere. Dirlo qui perché la prossima misura non venga letta come una regressione.
     """
     n = 0
     for i in range(0, len(chunks), EMBED_BATCH):
@@ -101,6 +103,10 @@ async def _embed_onto_chunks(embedding_service, chunks: list) -> int:
         vettori = await embedding_service.get_embeddings([c.content for c in lotto])
         for c, emb in zip(lotto, vettori, strict=True):
             c.embedding = emb
+        await store.add_chunks(lotto, metadata_json)
+        # Il punto di tutto l'esercizio: da qui il vettore non serve più a nessuno.
+        for c in lotto:
+            c.embedding = None
         n += len(lotto)
     return n
 
@@ -190,14 +196,19 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
         )
         print(f"  · {rel}: {len(chunks)} chunk (titolo: {title!r})")
 
-    # Embedding di tutti i chunk (batch) → attach.
+    # Embedding e scrittura su Chroma A LOTTI, non in due fasi.
+    #
+    # Le due fasi (embedda tutto → scrivi tutto) obbligavano i vettori dell'intero corpus a
+    # coesistere: è il difetto della memoria dell'ingest. Qui ogni lotto viene scritto e
+    # lasciato andare. I metadati del documento si serializzano UNA volta per documento,
+    # perché un lotto attraversa più documenti.
     flat_chunks = [c for d in all_documents for c in d.chunks]
-    await _embed_onto_chunks(embedding_service, flat_chunks)
+    metadata_json = {d.source_id: d.metadata.model_dump_json() for d in all_documents}
+    await _embedda_e_scrivi_a_lotti(embedding_service, retrieval_store, flat_chunks, metadata_json)
 
-    # Indicizza in Chroma (denso) + Whoosh (keyword IT). Whoosh in batch: un solo writer
-    # e un solo commit — il per-documento del vendored costa 10-20 min su 13.670 chunk
-    # (segmento per commit, merge crescenti) e si ripagherebbe a ogni run di CI.
-    await retrieval_store.add_documents(all_documents)
+    # Whoosh in batch: un solo writer e un solo commit — il per-documento del vendored costa
+    # 10-20 min su 13.670 chunk (segmento per commit, merge crescenti) e si ripagherebbe a
+    # ogni run di CI. Non tocca gli embedding, quindi resta dov'era.
     await whoosh.index_documents(
         [
             {

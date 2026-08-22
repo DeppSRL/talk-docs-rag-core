@@ -16,7 +16,7 @@ from typing import Any
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
-from ..models.document import Document, DocumentMetadata, SearchResult
+from ..models.document import Document, DocumentChunk, DocumentMetadata, SearchResult
 from ..services.embeddings import EmbeddingService
 from .base import VectorStore
 
@@ -99,6 +99,60 @@ class ChromaVectorStore(VectorStore):
                 continue
 
         return added_ids
+
+    async def add_chunks(self, chunks: list[DocumentChunk], metadata_json: dict[str, str]) -> int:
+        """Scrive un LOTTO di chunk già embeddati, senza passare dal documento intero.
+
+        Esiste per la memoria, non per comodità. `add_documents` pretende documenti completi,
+        quindi l'ingest doveva tenere in memoria **tutti** i vettori del corpus fino all'unica
+        chiamata finale: 18.396 chunk × 1024 dimensioni di float distinti sono centinaia di
+        MiB che nessuno rilegge più. Scrivendo per lotti, i vettori di un lotto muoiono col
+        lotto.
+
+        `metadata_json` porta i metadati del documento **già serializzati**, per `doc_id`: un
+        lotto attraversa più documenti, e ri-serializzare per ogni chunk (come fa
+        `add_documents`) sarebbe lo stesso lavoro moltiplicato per il numero di chunk.
+
+        A differenza di `add_documents`, un errore qui **non viene inghiottito**. Là un
+        documento che non entra viene stampato e saltato, e l'ingest torna «riuscito» con un
+        pezzo di corpus mancante: su un lotto che attraversa più documenti quella clemenza
+        farebbe sparire in silenzio decine di documenti. Un ingest che fallisce si rifà; un
+        indice a cui mancano dei documenti risponde, e non si sa che gli mancano.
+        """
+        if not chunks:
+            return 0
+
+        ids = []
+        contenuti = []
+        vettori = []
+        metadati = []
+        for chunk in chunks:
+            if chunk.embedding is None:
+                raise ValueError(
+                    f"Chunk {chunk.chunk_id}: nessun embedding. `add_chunks` scrive lotti già "
+                    "embeddati; l'embedding lo possiede l'ingest."
+                )
+            doc_id = chunk.metadata.get("doc_id")
+            if doc_id not in metadata_json:
+                raise KeyError(
+                    f"Chunk {chunk.chunk_id}: metadati del documento '{doc_id}' non forniti. "
+                    "Senza, il passaggio recuperato non saprebbe più da quale documento viene."
+                )
+            ids.append(chunk.chunk_id)
+            contenuti.append(chunk.content)
+            vettori.append(chunk.embedding)
+            metadati.append(
+                {
+                    "source_id": doc_id,
+                    "start_index": chunk.start_index,
+                    "end_index": chunk.end_index,
+                    "document_metadata": metadata_json[doc_id],
+                    **chunk.metadata,
+                }
+            )
+
+        self.collection.add(ids=ids, documents=contenuti, embeddings=vettori, metadatas=metadati)
+        return len(ids)
 
     async def update_document(self, doc_id: str, document: Document) -> bool:
         """Update a document in ChromaDB."""
