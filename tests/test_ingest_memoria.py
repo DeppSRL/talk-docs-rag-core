@@ -180,9 +180,13 @@ def corpus(tmp_path) -> Path:
 
 @pytest.fixture
 def esegui(monkeypatch, corpus, tmp_path):
-    """Esegue `run_ingest` con store, embedding e Whoosh finti; restituisce le tre spie."""
+    """Esegue `run_ingest` con store, embedding e Whoosh finti; restituisce le spie e lo stato.
 
-    def _esegui():
+    `passa_stato=False` esegue senza il parametro nuovo: è il modo di provare che un
+    consumatore che non lo conosce non cambia comportamento.
+    """
+
+    def _esegui(passa_stato=True):
         from talk_docs_rag_core import wiring
 
         embedding = _EmbeddingFinto()
@@ -215,8 +219,9 @@ def esegui(monkeypatch, corpus, tmp_path):
             frasi_index_path=str(tmp_path / "frasi.json"),
             whoosh_index_dir=str(tmp_path / "whoosh"),
         )
-        rep = asyncio.run(mod.run_ingest(cfg, corpus_dir=corpus))
-        return rep, embedding, store, whoosh
+        stato = mod.StatoIngest() if passa_stato else None
+        rep = asyncio.run(mod.run_ingest(cfg, corpus_dir=corpus, stato=stato))
+        return rep, embedding, store, whoosh, stato
 
     return _esegui
 
@@ -228,20 +233,20 @@ class _ClientChroma:
 
 class TestVettoriVivi:
     def test_nessun_vettore_sopravvive_all_ingest(self, esegui):
-        _, _, store, _ = esegui()
+        _, _, store, _, _ = esegui()
         assert all(c.embedding is None for c in store.tutti_i_chunk)
 
     def test_non_piu_di_un_lotto_di_vettori_alla_volta(self, esegui):
         """La proprietà per cui esiste questo incremento. Se un giorno tornasse la scrittura
         unica finale, questo numero salirebbe al numero di chunk del corpus."""
-        rep, _, store, _ = esegui()
+        rep, _, store, _, _ = esegui()
         assert store.vivi_max <= mod.EMBED_BATCH
         assert rep.n_chunks > mod.EMBED_BATCH, "corpus troppo piccolo: il test non proverebbe niente"
 
     def test_i_lotti_di_embedding_sono_quelli_di_prima(self, esegui):
         """Stesse chiamate al provider e stessi token: un rimedio alla memoria non deve
         spostare il costo, o la misura di ieri non è più confrontabile con quella di domani."""
-        rep, embedding, _, _ = esegui()
+        rep, embedding, _, _, _ = esegui()
         attesi = [mod.EMBED_BATCH] * (rep.n_chunks // mod.EMBED_BATCH)
         if rep.n_chunks % mod.EMBED_BATCH:
             attesi.append(rep.n_chunks % mod.EMBED_BATCH)
@@ -249,7 +254,7 @@ class TestVettoriVivi:
 
     def test_ogni_chunk_arriva_nell_indice(self, esegui):
         """Il modo peggiore di dimezzare il picco è dimezzare l'indice."""
-        rep, _, store, whoosh = esegui()
+        rep, _, store, whoosh, _ = esegui()
         assert len(store.chunk_scritti) == rep.n_chunks
         assert len(set(store.chunk_scritti)) == rep.n_chunks
         assert whoosh.chunk == rep.n_chunks
@@ -258,7 +263,107 @@ class TestVettoriVivi:
         """`corpus_version` è la chiave con cui si invalida la cache semantica: se cambiasse
         per un rimedio alla memoria, ogni cache verrebbe buttata senza che il corpus sia
         cambiato."""
-        rep, _, _, _ = esegui()
+        rep, _, _, _, _ = esegui()
         assert rep.n_files == 12
         assert Path(rep.manifest_path).exists()
         assert rep.corpus_version and rep.corpus_content_hash
+
+
+# =====================================================================================
+# `StatoIngest`: cosa si sa di una run che è fallita
+# =====================================================================================
+#
+# La domanda che conta dopo un fallimento non è «com'è andata» — è andata male — ma «lo store
+# è stato toccato?». Da quando le scritture sono a lotti, un guasto a metà lascia una
+# collection parziale che va svuotata; un guasto prima della prima scrittura lascia l'indice
+# precedente **intatto**, e svuotarlo lì cancella 511 documenti funzionanti.
+#
+# Prima il consumatore lo deduceva dal proprio flusso di controllo, e l'inferenza era sbagliata
+# ai due estremi. Qui si prova che l'osservazione è esatta agli stessi due estremi.
+
+
+class TestStatoIngest:
+    def test_un_corpus_senza_file_supportati_non_tocca_lo_store(self, tmp_path):
+        """`_discover_files` non trova niente e `run_ingest` alza **prima** di cancellare la
+        collection: il flag deve restare falso, o il consumatore cancella l'indice di ieri
+        perché il corpus di oggi era vuoto."""
+        vuoto = tmp_path / "corpus-vuoto"
+        vuoto.mkdir()
+        (vuoto / "README.md").write_text("solo un readme", encoding="utf-8")
+        stato = mod.StatoIngest()
+        cfg = RagConfig(corpus_dir=str(vuoto), corpus_card_dir=str(vuoto / "card"))
+
+        with pytest.raises(SystemExit):
+            asyncio.run(mod.run_ingest(cfg, corpus_dir=vuoto, stato=stato))
+
+        assert stato.store_toccato is False
+
+    def test_un_guasto_nel_preambolo_non_tocca_lo_store(self, monkeypatch, corpus, tmp_path):
+        """Client Chroma che non si costruisce, servizio di embedding che alza: sopra la
+        cancellazione non c'è niente di distruttivo, e il flag lo dichiara."""
+        from talk_docs_rag_core import wiring
+
+        def esplode(cfg):
+            raise RuntimeError("MISTRAL_API_KEY assente")
+
+        monkeypatch.setattr(wiring, "build_embedding_service", esplode)
+        stato = mod.StatoIngest()
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(mod.run_ingest(RagConfig(embed_dim=EMBED_DIM), corpus_dir=corpus, stato=stato))
+
+        assert stato.store_toccato is False
+
+    def test_un_guasto_a_meta_scrittura_dichiara_lo_store_toccato(self, monkeypatch, corpus, tmp_path):
+        """Il caso per cui tutto questo esiste: la collection è parziale e va svuotata."""
+        from talk_docs_rag_core import wiring
+
+        embedding = _EmbeddingFinto()
+        store = _StoreSpia()
+        whoosh = _WhooshFinto()
+
+        async def esplode_al_secondo_lotto(chunks, metadata_json):
+            store.chunk_scritti.extend(c.chunk_id for c in chunks)
+            if len(store.chunk_scritti) > mod.EMBED_BATCH:
+                raise RuntimeError("429 dal provider")
+            return len(chunks)
+
+        store.add_chunks = esplode_al_secondo_lotto
+        monkeypatch.setattr(wiring, "build_embedding_service", lambda cfg: embedding)
+        monkeypatch.setattr(wiring, "build_chroma_client", lambda cfg: _ClientChroma())
+        monkeypatch.setattr(wiring, "build_retrieval_store", lambda cfg, emb, client=None: store)
+
+        async def _whoosh(cfg):
+            return whoosh
+
+        monkeypatch.setattr(wiring, "build_whoosh", _whoosh)
+        stato = mod.StatoIngest()
+        cfg = RagConfig(
+            embed_dim=EMBED_DIM,
+            corpus_dir=str(corpus),
+            corpus_card_dir=str(corpus / "card"),
+            term_df_path=str(tmp_path / "term_df.json"),
+            frasi_index_path=str(tmp_path / "frasi.json"),
+            whoosh_index_dir=str(tmp_path / "whoosh"),
+        )
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(mod.run_ingest(cfg, corpus_dir=corpus, stato=stato))
+
+        assert stato.store_toccato is True
+        assert store.chunk_scritti, "qualcosa era già stato scritto: è il punto"
+
+    def test_una_run_riuscita_dichiara_lo_store_toccato(self, esegui):
+        """Il flag dice «toccato», non «lasciato a metà»: dopo una run riuscita è vero, e sta al
+        consumatore sapere che quel che c'è dentro è completo. Confondere le due cose significa
+        cancellare un indice appena costruito."""
+        _, _, _, _, stato = esegui()
+        assert stato.store_toccato is True
+
+    def test_senza_stato_il_comportamento_e_quello_di_prima(self, esegui):
+        """Il parametro è facoltativo: un consumatore che non lo conosce — il comando da riga di
+        comando, l'harness di eval — non cambia comportamento e non vede eccezioni nuove."""
+        rep, embedding, store, whoosh, stato = esegui(passa_stato=False)
+        assert stato is None
+        assert rep.n_chunks == len(store.chunk_scritti) == whoosh.chunk
+        assert embedding.usage["calls"] > 1
