@@ -36,6 +36,42 @@ def _sha256(text: str) -> str:
 
 
 @dataclass
+class StatoIngest:
+    """Ciò che il chiamante può sapere di una run **anche quando fallisce**.
+
+    `IngestReport` torna solo se l'ingest arriva alla fine. Ma la domanda che conta dopo un
+    fallimento è un'altra: *lo store è stato toccato?* Da quando le scritture su Chroma sono a
+    lotti, un guasto a metà lascia una collection parziale, e chi serve le risposte deve
+    svuotarla — mentre un guasto **prima** della prima scrittura lascia l'indice precedente
+    intatto, e svuotarlo lì significa cancellare un indice funzionante.
+
+    Prima questo si deduceva dal flusso di controllo del chiamante («ho chiamato `run_ingest`,
+    quindi assumo che abbia toccato lo store»), e l'inferenza era sbagliata ai due estremi: il
+    corpus senza file supportati alza `SystemExit` prima di ogni scrittura, e un guasto dopo la
+    fine non ha nulla di parziale da svuotare. Due modi di cancellare 511 documenti buoni.
+
+    Si passa a `run_ingest` e si legge dopo, anche dal ramo `except`:
+
+        stato = StatoIngest()
+        try:
+            rep = await run_ingest(cfg, corpus_dir=dir, stato=stato)
+        except Exception:
+            if stato.store_toccato:
+                ...  # la collection è parziale: svuotala
+
+    Perché un oggetto mutabile e non un valore di ritorno: `run_ingest` **alza**, e un valore
+    di ritorno non arriva a chi gestisce l'eccezione. Perché non un'eccezione dedicata: il
+    consumatore distingue già famiglie di guasti (fonte, `SystemExit`, resto) e incapsularle
+    tutte gli farebbe perdere quella distinzione.
+    """
+
+    store_toccato: bool = False
+    """`True` da quando lo store può essere stato alterato — cioè dalla cancellazione della
+    collection in avanti, compresa la cancellazione stessa. Non «da quando la scrittura è
+    riuscita»: una `delete_collection` interrotta a metà è già un'alterazione."""
+
+
+@dataclass
 class IngestReport:
     corpus_version: str
     corpus_content_hash: str
@@ -111,7 +147,15 @@ async def _embedda_e_scrivi_a_lotti(embedding_service, store, chunks: list, meta
     return n
 
 
-async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestReport:
+async def run_ingest(
+    cfg: RagConfig, corpus_dir: Path | None = None, stato: StatoIngest | None = None
+) -> IngestReport:
+    """Costruisce l'indice da un corpus su disco. Vedi `StatoIngest` per il parametro `stato`.
+
+    `stato` è facoltativo e retrocompatibile: chi non lo passa ottiene esattamente il
+    comportamento di prima. Chi lo passa può sapere, dal ramo `except`, se questa run ha
+    toccato lo store — l'unica cosa che autorizza a svuotare una collection.
+    """
     from talk_docs_rag_core.wiring import (
         build_chroma_client,
         build_embedding_service,
@@ -130,6 +174,13 @@ async def run_ingest(cfg: RagConfig, corpus_dir: Path | None = None) -> IngestRe
 
     embedding_service = build_embedding_service(cfg)
     chroma_client = build_chroma_client(cfg)
+
+    # Da QUI in avanti lo store può essere alterato, e il chiamante deve poterlo sapere anche
+    # se la riga successiva alza: la cancellazione stessa è un'alterazione, quindi il flag si
+    # scrive **prima** e non dopo. Tutto ciò che sta sopra — discovery dei file, costruzione del
+    # servizio di embedding, del client Chroma — fallisce lasciando l'indice precedente intatto.
+    if stato is not None:
+        stato.store_toccato = True
 
     # Ricostruzione pulita delle collection (idempotenza dello stato dello store).
     for name in (cfg.chroma_collection_retrieval,):

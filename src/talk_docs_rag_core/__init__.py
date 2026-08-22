@@ -28,7 +28,7 @@ rifiuto diventa una coincidenza.
 from __future__ import annotations
 
 from talk_docs_rag_core.config import RagConfig
-from talk_docs_rag_core.ingest.pipeline import IngestReport, run_ingest
+from talk_docs_rag_core.ingest.pipeline import IngestReport, StatoIngest, run_ingest
 from talk_docs_rag_core.pipeline import RagPipeline, build_pipeline, load_corpus_version
 from talk_docs_rag_core.rag.generation import RagResult
 
@@ -42,6 +42,8 @@ __all__ = [
     # indicizzazione
     "run_ingest",
     "IngestReport",
+    # ciò che si sa di una run anche quando fallisce: lo store è stato toccato?
+    "StatoIngest",
     # provenienza del corpus: l'hash con cui una misura si dichiara riproducibile
     "load_corpus_version",
 ]
